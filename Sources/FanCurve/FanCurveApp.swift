@@ -1,8 +1,19 @@
 import SwiftUI
 import SMCKit
 
+/// Opening FanCurve again (Finder, Spotlight, Dock) while it's running shows Settings.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    static let openSettings = Notification.Name("FanCurveOpenSettings")
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        NotificationCenter.default.post(name: Self.openSettings, object: nil)
+        return false
+    }
+}
+
 @main
 struct FanCurveApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = Model()
     @StateObject private var keyboard = KeyboardBlocker()
     @StateObject private var displays = Displays()
@@ -13,24 +24,22 @@ struct FanCurveApp: App {
         MenuBarExtra {
             MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
         } label: {
-            if keyboard.isOn {
-                Label("Keyboard off \(keyboard.secondsLeft / 60):\(String(format: "%02d", keyboard.secondsLeft % 60))", systemImage: "keyboard.badge.ellipsis")
-                    .labelStyle(.titleAndIcon)
-            } else {
-                fanLabel
+            MenuBarLabel(nav: nav) {
+                if keyboard.isOn {
+                    Label("Keyboard off \(mmss(keyboard.secondsLeft))", systemImage: "keyboard.badge.ellipsis")
+                        .labelStyle(.titleAndIcon)
+                } else {
+                    fanLabel
+                }
             }
         }
 
-        Window("FanCurve", id: "editor") {
-            TabView(selection: $nav.tab) {
-                EditorView().tabItem { Label("Fans", systemImage: "fan") }.tag(AppNav.Tab.fans)
-                DisplaysView().tabItem { Label("Displays", systemImage: "display") }.tag(AppNav.Tab.displays)
-                MicView().tabItem { Label("Mic", systemImage: "mic") }.tag(AppNav.Tab.mic)
-                KeyboardView().tabItem { Label("Keyboard", systemImage: "keyboard") }.tag(AppNav.Tab.keyboard)
-            }
-            .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
+        Window("FanCurve Settings", id: "settings") {
+            SettingsView()
+                .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
         }
-        .defaultSize(width: 720, height: 600)
+        .defaultSize(width: 860, height: 640)
+        .windowResizability(.contentMinSize)
 
         // Separate mic status icon; visibility follows the "Show mic icon in menu bar" setting.
         MenuBarExtra(isInserted: $mic.showIndicator) {
@@ -48,6 +57,17 @@ struct FanCurveApp: App {
     }
 }
 
+/// The menu bar label is always alive, so it's where the "open Settings" request is handled.
+struct MenuBarLabel<Content: View>: View {
+    let nav: AppNav
+    @ViewBuilder let content: Content
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        content.onReceive(NotificationCenter.default.publisher(for: AppDelegate.openSettings)) { _ in nav.openSettings(openWindow) }
+    }
+}
+
 struct MenuContent: View {
     @EnvironmentObject var model: Model
     @EnvironmentObject var keyboard: KeyboardBlocker
@@ -62,7 +82,6 @@ struct MenuContent: View {
         Divider()
         Toggle("Use fan curve", isOn: $model.config.enabled)
         ProfileMenu()
-        Button("Edit curve…") { nav.open(.fans, openWindow) }
         Divider()
         if displays.monitors.isEmpty {
             Text("No external displays")
@@ -78,25 +97,52 @@ struct MenuContent: View {
         }
         Divider()
         Toggle("Mute microphone\(mic.shortcut.map { "  (\($0.display))" } ?? "")", isOn: Binding(get: { mic.isMuted }, set: { mic.setMuted($0) }))
-        Button("Change mic shortcut…") { nav.open(.mic, openWindow) }
         Toggle("Keyboard cleaning mode", isOn: Binding(get: { keyboard.isOn }, set: { _ in keyboard.toggle() }))
         if keyboard.needsPermission {
             Button("Grant Accessibility access…") { keyboard.openAccessibilitySettings() }
         }
         Divider()
-        Button("Quit") { NSApp.terminate(nil) }
+        Button("Settings…") { nav.openSettings(openWindow) }.keyboardShortcut(",")
+        Button("Quit FanCurve") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
 }
 
-/// Which tab the settings window shows, so menu items can jump straight to one.
+/// Settings window navigation (sidebar selection is remembered between openings).
 @MainActor
 final class AppNav: ObservableObject {
-    enum Tab: Hashable { case fans, displays, mic, keyboard }
-    @Published var tab: Tab = .fans
+    enum Page: String, CaseIterable, Identifiable {
+        case fans, displays, mic, keyboard
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .fans: return "Fans"
+            case .displays: return "Displays"
+            case .mic: return "Microphone"
+            case .keyboard: return "Keyboard"
+            }
+        }
+        var symbol: String {
+            switch self {
+            case .fans: return "fan.fill"
+            case .displays: return "display"
+            case .mic: return "mic.fill"
+            case .keyboard: return "keyboard.fill"
+            }
+        }
+        var tint: Color {
+            switch self {
+            case .fans: return .blue
+            case .displays: return .indigo
+            case .mic: return .red
+            case .keyboard: return .gray
+            }
+        }
+    }
 
-    func open(_ tab: Tab, _ openWindow: OpenWindowAction) {
-        self.tab = tab
-        openWindow(id: "editor")
+    @Published var page: Page = .fans
+
+    func openSettings(_ openWindow: OpenWindowAction) {
+        openWindow(id: "settings")
         NSApp.activate(ignoringOtherApps: true)
     }
 }
@@ -110,88 +156,8 @@ struct MicMenu: View {
     var body: some View {
         Button(mic.isMuted ? "Unmute microphone" : "Mute microphone") { mic.toggle() }
         Text("Shortcut: \(mic.shortcut?.display ?? "none")")
-        Button("Change shortcut…") { nav.open(.mic, openWindow) }
-    }
-}
-
-struct EditorView: View {
-    @EnvironmentObject var model: Model
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !model.daemonRunning {
-                banner("Daemon not running — the curve won't be applied. Run `sudo ./install.sh` in the project folder.", .red)
-            } else if let s = model.status, s.mode == "error" {
-                banner("Daemon error: \(s.message ?? "unknown")", .red)
-            }
-            if let e = model.saveError { banner(e, .orange) }
-
-            HStack(spacing: 16) {
-                Toggle("Use fan curve", isOn: $model.config.enabled).toggleStyle(.switch)
-                Picker("Follow", selection: $model.config.source) {
-                    ForEach(TempSource.allCases) { Text($0.label).tag($0) }
-                }
-                .frame(maxWidth: 320)
-                Spacer()
-                Text("Profile").foregroundStyle(.secondary)
-                ProfileMenu()
-                .fixedSize()
-            }
-
-            CurveEditor(points: $model.config.points, currentTemp: model.currentTemp, fanMin: model.fanMin, fanMax: model.fanMax)
-                .frame(minHeight: 300)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor)))
-
-            Text("Drag points to shape the curve · double-click to add · right-click to delete")
-                .font(.caption).foregroundStyle(.secondary)
-
-            HStack(alignment: .top, spacing: 28) {
-                stat("Following", fmt(model.currentTemp))
-                stat("Smoothed", fmt(model.status?.smoothedTemp))
-                stat("Daemon", daemonText)
-                ForEach(model.fans) { f in
-                    stat("Fan \(f.id + 1)", f.actual < 100 ? "off" : "\(Int(f.actual)) rpm")
-                }
-                Spacer()
-            }
-
-            HStack(spacing: 24) {
-                LabeledContent("Smoothing") {
-                    Slider(value: $model.config.smoothing, in: 1...20, step: 1).frame(width: 140)
-                    Text("\(Int(model.config.smoothing)) s").monospacedDigit().frame(width: 36)
-                }
-                LabeledContent("Always max above") {
-                    Stepper("\(Int(model.config.criticalTemp)) °C", value: $model.config.criticalTemp, in: 80...105, step: 1)
-                }
-                Spacer()
-            }
-            .font(.callout)
-
-        }
-        .padding(20)
-        .frame(minWidth: 640, minHeight: 520)
-    }
-
-    private var daemonText: String {
-        guard model.daemonRunning, let s = model.status else { return "stopped" }
-        switch s.mode {
-        case "curve": return "\(Int(s.targetRPM ?? 0)) rpm"
-        case "critical": return "MAX (critical)"
-        case "auto": return "macOS auto"
-        default: return s.mode
-        }
-    }
-
-    private func banner(_ text: String, _ color: Color) -> some View {
-        Text(text).font(.callout).padding(8).frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 6).fill(color.opacity(0.15)))
-    }
-
-    private func stat(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title3.monospacedDigit())
-        }
+        Divider()
+        Button("Settings…") { nav.openSettings(openWindow) }
     }
 }
 

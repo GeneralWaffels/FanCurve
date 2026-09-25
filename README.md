@@ -2,7 +2,7 @@
 
 A Macs Fan Control–style fan curve app for Apple Silicon (built and verified on a MacBook Pro M5 Pro; M1–M4 fan unlock via `Ftst` follows exelban/stats).
 
-- **FanCurve.app**: menu bar app with a draggable temperature→RPM curve editor. It runs as your user and reads the SMC directly.
+- **FanCurve.app**: a menu bar app that runs as your user and reads the SMC directly. **Settings…** (⌘,) opens a System Settings–style window with Fans, Displays, Microphone and Keyboard pages, and so does launching FanCurve again from Applications or Spotlight. The Fans page has a draggable temperature→RPM curve editor and saved profiles.
 - **External display brightness (DDC/CI)**: a brightness slider for each external monitor, in the Displays tab and the menu bar. It works over USB-C, Thunderbolt and DisplayPort; some HDMI ports and docks don't pass DDC through.
 - **Match laptop light sensor**: sets monitor brightness from the MacBook's ambient light sensor, on a log curve between your Darkest and Brightest settings (0 lux → Darkest, 1000+ lux → Brightest). It's smoothed and only writes changes of 2% or more. It pauses while the lid is closed, because the sensor is covered. Moving a slider by hand switches it off.
 - **Global mic mute**: mutes every input device system-wide (hardware mute where available, otherwise input volume 0). It re-applies every second and when devices change, so a headset plugged in while muted is muted too. You set a custom global shortcut (default ⌃⌥M) in the Mic tab. A separate menu bar mic icon can be shown Always, Only while muted, or Never. The mic is unmuted when FanCurve quits.

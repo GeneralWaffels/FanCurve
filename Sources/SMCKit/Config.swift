@@ -44,7 +44,7 @@ public struct FanConfig: Codable, Equatable {
 }
 
 /// State the daemon publishes so the app can show whether it's actually in control.
-public struct DaemonStatus: Codable {
+public struct DaemonStatus: Codable, Equatable {
     public var updated: Date
     public var temp: Double?
     public var smoothedTemp: Double?

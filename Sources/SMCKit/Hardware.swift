@@ -15,13 +15,17 @@ public enum TempSource: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-public struct Fan: Identifiable {
+public struct Fan: Identifiable, Equatable {
     public let id: Int
     public let actual: Double
     public let target: Double
     public let min: Double
     public let max: Double
     public let manual: Bool
+
+    public init(id: Int, actual: Double, target: Double, min: Double, max: Double, manual: Bool) {
+        self.id = id; self.actual = actual; self.target = target; self.min = min; self.max = max; self.manual = manual
+    }
 }
 
 /// Apple Silicon sensor/fan map (M5 Pro verified; M1–M4 per exelban/stats).

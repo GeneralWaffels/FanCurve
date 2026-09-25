@@ -8,7 +8,6 @@ final class Model: ObservableObject {
     @Published var fans: [Fan] = []
     @Published var status: DaemonStatus?
     @Published var saveError: String?
-    @Published var history: [Double] = []   // recent temps of the selected source
     /// User-saved curves (name → points). Built-in Noctua presets are separate and can't be deleted.
     @Published private(set) var customProfiles: [String: [CurvePoint]] = [:]
 
@@ -34,12 +33,24 @@ final class Model: ObservableObject {
     /// Daemon counts as running if it wrote status in the last 10 s.
     var daemonRunning: Bool { status.map { Date().timeIntervalSince($0.updated) < 10 } ?? false }
 
+    /// One sensor pass per second; published values are rounded and only assigned when they
+    /// change, so the UI redraws at most once a second instead of for every sensor flicker.
     func refresh() {
         guard let hw else { return }
-        for s in TempSource.allCases { temps[s] = hw.temperature(s) }
-        fans = hw.fans()
-        status = Paths.loadStatus()
-        if let t = currentTemp { history.append(t); if history.count > 120 { history.removeFirst() } }
+        let cpu = hw.cpuTemps(), gpu = hw.gpuTemps()
+        func r(_ v: Double?) -> Double? { v.map { ($0 * 2).rounded() / 2 } }   // 0.5 °C steps
+        let t: [TempSource: Double?] = [
+            .cpuMax: r(cpu.max()),
+            .cpuAvg: r(cpu.isEmpty ? nil : cpu.reduce(0, +) / Double(cpu.count)),
+            .gpuMax: r(gpu.max()),
+            .hottest: r((cpu + gpu).max()),
+        ]
+        let newTemps = t.compactMapValues { $0 }
+        if newTemps != temps { temps = newTemps }
+        let newFans = hw.fans().map { Fan(id: $0.id, actual: ($0.actual / 10).rounded() * 10, target: $0.target, min: $0.min, max: $0.max, manual: $0.manual) }
+        if newFans != fans { fans = newFans }
+        let newStatus = Paths.loadStatus()
+        if newStatus != status { status = newStatus }
     }
 
     private func scheduleSave() {
