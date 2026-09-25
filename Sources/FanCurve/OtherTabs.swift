@@ -74,6 +74,10 @@ struct MicView: View {
                 .font(.caption).foregroundStyle(.secondary)
 
             LabeledContent("Toggle shortcut") { ShortcutRecorder(shortcut: $mic.shortcut) }
+            if mic.shortcutConflict, let s = mic.shortcut {
+                Text("\(s.display) is already used by macOS or another app — pick a different combination.")
+                    .font(.caption).foregroundStyle(.red)
+            }
             Text("Works from any app. Use at least one of ⌘ ⌥ ⌃ ⇧, or an F-key. Esc cancels recording, Delete clears it.")
                 .font(.caption).foregroundStyle(.secondary)
 

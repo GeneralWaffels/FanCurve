@@ -57,15 +57,40 @@ final class HotKeys {
         }, 1, &spec, nil, nil)
     }
 
-    func register(id: UInt32, shortcut: Shortcut?, action: @escaping () -> Void) {
+    private var shortcuts: [UInt32: Shortcut] = [:]
+    private var suspended = false
+
+    /// Registers (or clears) a hotkey. Returns false if macOS refused it — usually because
+    /// another app or a system shortcut already owns that combination.
+    @discardableResult
+    func register(id: UInt32, shortcut: Shortcut?, action: @escaping () -> Void) -> Bool {
         if let old = refs.removeValue(forKey: id) { UnregisterEventHotKey(old) }
         actions[id] = action
-        guard let shortcut else { return }
+        shortcuts[id] = shortcut
+        guard let shortcut, !suspended else { return true }
+        return install(id: id, shortcut)
+    }
+
+    private func install(id: UInt32, _ shortcut: Shortcut) -> Bool {
         var ref: EventHotKeyRef?
         let hkID = EventHotKeyID(signature: Self.signature, id: id)
-        if RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, hkID, GetApplicationEventTarget(), 0, &ref) == noErr, let ref {
-            refs[id] = ref
-        }
+        guard RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, hkID, GetApplicationEventTarget(), 0, &ref) == noErr,
+              let ref else { return false }
+        refs[id] = ref
+        return true
+    }
+
+    /// While recording a new shortcut, global hotkeys are paused so the current combination
+    /// reaches the recorder instead of firing its action.
+    func suspend() {
+        suspended = true
+        for ref in refs.values { UnregisterEventHotKey(ref) }
+        refs = [:]
+    }
+
+    func resume() {
+        suspended = false
+        for (id, s) in shortcuts { _ = install(id: id, s) }
     }
 }
 
@@ -78,6 +103,7 @@ final class RecorderState: ObservableObject {
 
     func start(onKey: @escaping (NSEvent) -> Void) {
         recording = true
+        HotKeys.shared.suspend()
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             MainActor.assumeIsolated { onKey(event) }
             return nil
@@ -85,6 +111,7 @@ final class RecorderState: ObservableObject {
     }
 
     func stop() {
+        if recording { HotKeys.shared.resume() }
         recording = false
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil

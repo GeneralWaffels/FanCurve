@@ -7,10 +7,11 @@ struct FanCurveApp: App {
     @StateObject private var keyboard = KeyboardBlocker()
     @StateObject private var displays = Displays()
     @StateObject private var mic = MicMuter()
+    @StateObject private var nav = AppNav()
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic)
+            MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
         } label: {
             if keyboard.isOn {
                 Label("Keyboard off \(keyboard.secondsLeft / 60):\(String(format: "%02d", keyboard.secondsLeft % 60))", systemImage: "keyboard.badge.ellipsis")
@@ -21,20 +22,19 @@ struct FanCurveApp: App {
         }
 
         Window("FanCurve", id: "editor") {
-            TabView {
-                EditorView().tabItem { Label("Fans", systemImage: "fan") }
-                DisplaysView().tabItem { Label("Displays", systemImage: "display") }
-                MicView().tabItem { Label("Mic", systemImage: "mic") }
-                KeyboardView().tabItem { Label("Keyboard", systemImage: "keyboard") }
+            TabView(selection: $nav.tab) {
+                EditorView().tabItem { Label("Fans", systemImage: "fan") }.tag(AppNav.Tab.fans)
+                DisplaysView().tabItem { Label("Displays", systemImage: "display") }.tag(AppNav.Tab.displays)
+                MicView().tabItem { Label("Mic", systemImage: "mic") }.tag(AppNav.Tab.mic)
+                KeyboardView().tabItem { Label("Keyboard", systemImage: "keyboard") }.tag(AppNav.Tab.keyboard)
             }
-            .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic)
+            .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
         }
         .defaultSize(width: 720, height: 600)
 
         // Separate mic status icon; visibility follows the "Show mic icon in menu bar" setting.
         MenuBarExtra(isInserted: $mic.showIndicator) {
-            Button(mic.isMuted ? "Unmute microphone" : "Mute microphone") { mic.toggle() }
-            if let s = mic.shortcut { Text("Shortcut: \(s.display)") }
+            MicMenu().environmentObject(mic).environmentObject(nav)
         } label: {
             Image(systemName: mic.isMuted ? "mic.slash.fill" : "mic.fill")
         }
@@ -53,6 +53,7 @@ struct MenuContent: View {
     @EnvironmentObject var keyboard: KeyboardBlocker
     @EnvironmentObject var displays: Displays
     @EnvironmentObject var mic: MicMuter
+    @EnvironmentObject var nav: AppNav
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -63,7 +64,7 @@ struct MenuContent: View {
         Menu("Preset") {
             ForEach(FanConfig.presetOrder, id: \.self) { name in Button(name) { model.applyPreset(name) } }
         }
-        Button("Edit curve…") { openWindow(id: "editor"); NSApp.activate(ignoringOtherApps: true) }
+        Button("Edit curve…") { nav.open(.fans, openWindow) }
         Divider()
         if displays.monitors.isEmpty {
             Text("No external displays")
@@ -79,12 +80,39 @@ struct MenuContent: View {
         }
         Divider()
         Toggle("Mute microphone\(mic.shortcut.map { "  (\($0.display))" } ?? "")", isOn: Binding(get: { mic.isMuted }, set: { mic.setMuted($0) }))
+        Button("Change mic shortcut…") { nav.open(.mic, openWindow) }
         Toggle("Keyboard cleaning mode", isOn: Binding(get: { keyboard.isOn }, set: { _ in keyboard.toggle() }))
         if keyboard.needsPermission {
             Button("Grant Accessibility access…") { keyboard.openAccessibilitySettings() }
         }
         Divider()
         Button("Quit") { NSApp.terminate(nil) }
+    }
+}
+
+/// Which tab the settings window shows, so menu items can jump straight to one.
+@MainActor
+final class AppNav: ObservableObject {
+    enum Tab: Hashable { case fans, displays, mic, keyboard }
+    @Published var tab: Tab = .fans
+
+    func open(_ tab: Tab, _ openWindow: OpenWindowAction) {
+        self.tab = tab
+        openWindow(id: "editor")
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+/// Menu for the separate mic status icon.
+struct MicMenu: View {
+    @EnvironmentObject var mic: MicMuter
+    @EnvironmentObject var nav: AppNav
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button(mic.isMuted ? "Unmute microphone" : "Mute microphone") { mic.toggle() }
+        Text("Shortcut: \(mic.shortcut?.display ?? "none")")
+        Button("Change shortcut…") { nav.open(.mic, openWindow) }
     }
 }
 

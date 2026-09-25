@@ -22,6 +22,8 @@ final class MicMuter: ObservableObject {
     @Published private(set) var isMuted = false
     @Published var indicator: IndicatorMode { didSet { UserDefaults.standard.set(indicator.rawValue, forKey: "micIndicator") } }
     @Published var shortcut: Shortcut? { didSet { saveShortcut(); registerHotKey() } }
+    /// Set when macOS refuses the shortcut (already used by the system or another app).
+    @Published private(set) var shortcutConflict = false
 
     /// Binding for the MenuBarExtra's isInserted. SwiftUI writes this back on every scene update,
     /// so the setter must only react to a real change (the user ⌘-dragging the icon out), otherwise
@@ -133,6 +135,6 @@ final class MicMuter: ObservableObject {
     }
 
     private func registerHotKey() {
-        HotKeys.shared.register(id: 1, shortcut: shortcut) { [weak self] in self?.toggle() }
+        shortcutConflict = !HotKeys.shared.register(id: 1, shortcut: shortcut) { [weak self] in self?.toggle() }
     }
 }
