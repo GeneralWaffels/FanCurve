@@ -23,10 +23,12 @@ final class MicMuter: ObservableObject {
     @Published var indicator: IndicatorMode { didSet { UserDefaults.standard.set(indicator.rawValue, forKey: "micIndicator") } }
     @Published var shortcut: Shortcut? { didSet { saveShortcut(); registerHotKey() } }
 
-    /// Binding for the MenuBarExtra's isInserted.
+    /// Binding for the MenuBarExtra's isInserted. SwiftUI writes this back on every scene update,
+    /// so the setter must only react to a real change (the user ⌘-dragging the icon out), otherwise
+    /// each write republishes and the app graph re-renders forever.
     var showIndicator: Bool {
         get { indicator == .always || (indicator == .whenMuted && isMuted) }
-        set { if !newValue { indicator = .never } }
+        set { if !newValue && indicator == .always { indicator = .never } }
     }
 
     private var savedVolumes: [AudioDeviceID: [UInt32: Float32]] = [:]
