@@ -22,13 +22,22 @@ struct FanCurveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = Model()
     @StateObject private var keyboard = KeyboardBlocker()
-    @StateObject private var displays = Displays()
+    @StateObject private var displays: Displays
+    @StateObject private var brightnessKeys: BrightnessKeys
     @StateObject private var mic = MicMuter()
-    @StateObject private var nav = AppNav()
+    @StateObject private var nav = AppNav.shared
+    @StateObject private var loginItem = LoginItem()
+    @StateObject private var updater = Updater()
+
+    init() {
+        let d = Displays()
+        _displays = StateObject(wrappedValue: d)
+        _brightnessKeys = StateObject(wrappedValue: BrightnessKeys(displays: d))
+    }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
+            MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav).environmentObject(updater)
         } label: {
             MenuBarLabel(nav: nav) {
                 if keyboard.isOn {
@@ -43,8 +52,10 @@ struct FanCurveApp: App {
         Window("FanCurve Settings", id: "settings") {
             SettingsView()
                 .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
+                .environmentObject(brightnessKeys).environmentObject(loginItem).environmentObject(updater)
         }
-        .defaultSize(width: 860, height: 640)
+        .defaultSize(width: 760, height: 680)
+        .windowToolbarStyle(.unified)
         .windowResizability(.contentMinSize)
 
         // Separate mic status icon; visibility follows the "Show mic icon in menu bar" setting.
@@ -80,9 +91,14 @@ struct MenuContent: View {
     @EnvironmentObject var displays: Displays
     @EnvironmentObject var mic: MicMuter
     @EnvironmentObject var nav: AppNav
+    @EnvironmentObject var updater: Updater
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        if let v = updater.availableVersion {
+            Button("Install Update (\(v))…") { updater.install() }
+            Divider()
+        }
         Text("CPU \(fmt(model.temps[.cpuMax]))  ·  GPU \(fmt(model.temps[.gpuMax]))")
         ForEach(model.fans) { f in Text("Fan \(f.id + 1): \(Int(f.actual)) rpm") }
         Divider()
@@ -116,11 +132,13 @@ struct MenuContent: View {
 /// Settings window navigation (sidebar selection is remembered between openings).
 @MainActor
 final class AppNav: ObservableObject {
+    static let shared = AppNav()
     enum Page: String, CaseIterable, Identifiable {
-        case fans, displays, mic, keyboard
+        case general, fans, displays, mic, keyboard
         var id: String { rawValue }
         var title: String {
             switch self {
+            case .general: return "General"
             case .fans: return "Fans"
             case .displays: return "Displays"
             case .mic: return "Microphone"
@@ -129,14 +147,26 @@ final class AppNav: ObservableObject {
         }
         var symbol: String {
             switch self {
+            case .general: return "gearshape.fill"
             case .fans: return "fan.fill"
             case .displays: return "display"
             case .mic: return "mic.fill"
             case .keyboard: return "keyboard.fill"
             }
         }
+        /// Extra search terms, so e.g. "shortcut" finds Microphone like System Settings' search.
+        var keywords: [String] {
+            switch self {
+            case .general: return ["login", "startup", "update", "version"]
+            case .fans: return ["curve", "temperature", "profile", "noctua", "rpm", "cooling"]
+            case .displays: return ["brightness", "monitor", "ddc", "light sensor", "keys"]
+            case .mic: return ["mute", "shortcut", "microphone", "hotkey"]
+            case .keyboard: return ["cleaning", "block", "keys"]
+            }
+        }
         var tint: Color {
             switch self {
+            case .general: return .gray
             case .fans: return .blue
             case .displays: return .indigo
             case .mic: return .red
@@ -145,7 +175,24 @@ final class AppNav: ObservableObject {
         }
     }
 
-    @Published var page: Page = .fans
+    @Published var page: Page = .fans {
+        didSet { if page != oldValue && !navigatingHistory { back.append(oldValue); forward.removeAll() } }
+    }
+    @Published var search = ""
+    // Back/forward history, like System Settings' toolbar arrows.
+    @Published private(set) var back: [Page] = []
+    @Published private(set) var forward: [Page] = []
+    private var navigatingHistory = false
+
+    func goBack() { guard let p = back.popLast() else { return }; forward.append(page); move(to: p) }
+    func goForward() { guard let p = forward.popLast() else { return }; back.append(page); move(to: p) }
+    private func move(to p: Page) { navigatingHistory = true; page = p; navigatingHistory = false }
+
+    var filteredPages: [Page] {
+        let q = search.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return Page.allCases }
+        return Page.allCases.filter { $0.title.localizedCaseInsensitiveContains(q) || $0.keywords.contains { $0.localizedCaseInsensitiveContains(q) } }
+    }
 
     func openSettings(_ openWindow: OpenWindowAction) {
         openWindow(id: "settings")

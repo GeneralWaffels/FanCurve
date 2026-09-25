@@ -75,6 +75,23 @@ final class Displays: ObservableObject {
 
     func setAll(_ value: Double) { for m in monitors { setBrightness(value, for: m.id) } }
 
+    /// Brightness-key step: adjusts one monitor by `delta` percent and returns the new value.
+    @discardableResult
+    func nudge(_ id: Int, by delta: Double) -> Double {
+        guard monitors.indices.contains(id) else { return 0 }
+        let value = min(max(monitors[id].brightness + delta, 0), 100)
+        setBrightness(value, for: id)
+        return value
+    }
+
+    /// Which DDC monitor drives this screen: matched by product name, or the only external one.
+    func monitorID(for screen: NSScreen) -> Int? {
+        guard !screen.isBuiltIn else { return nil }
+        if let m = monitors.first(where: { $0.name == screen.localizedName }) { return m.id }
+        let externals = NSScreen.screens.filter { !$0.isBuiltIn }
+        return externals.count == 1 && monitors.count == 1 ? monitors[0].id : nil
+    }
+
     private func send(_ id: Int) {
         guard ddc.indices.contains(id), monitors.indices.contains(id) else { return }
         let display = ddc[id]

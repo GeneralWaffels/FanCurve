@@ -11,31 +11,76 @@ struct SettingsView: View {
         NavigationSplitView {
             // Only write back real changes: republishing an unchanged value makes SwiftUI re-render in a loop.
             List(selection: Binding(get: { Optional(nav.page) }, set: { if let p = $0, p != nav.page { nav.page = p } })) {
-                SidebarHeader()
-                    .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 12, trailing: 4))
-                    .selectionDisabled()
-                ForEach(AppNav.Page.allCases) { page in
-                    Label { Text(page.title) } icon: { IconTile(symbol: page.symbol, tint: page.tint) }
-                        .padding(.vertical, 1)
-                        .tag(page)
+                if nav.search.isEmpty {
+                    SidebarHeader().selectionDisabled()
+                }
+                Section {
+                    ForEach(nav.filteredPages) { page in
+                        Label { Text(page.title) } icon: { IconTile(symbol: page.symbol, tint: page.tint, size: 20) }
+                            .tag(page)
+                    }
                 }
             }
-            .listStyle(.sidebar)
-            .contentMargins(.horizontal, 10, for: .scrollContent)
-            .contentMargins(.top, 6, for: .scrollContent)
-            .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 280)
+            .searchable(text: $nav.search, placement: .sidebar, prompt: "Search")
+            .navigationSplitViewColumnWidth(min: 200, ideal: 215, max: 260)
         } detail: {
             Group {
                 switch nav.page {
+                case .general: GeneralPage()
                 case .fans: FansPage()
                 case .displays: DisplaysPage()
                 case .mic: MicPage()
                 case .keyboard: KeyboardPage()
                 }
             }
-            .navigationTitle(nav.page.title)
+            .frame(minWidth: 460)
+            .modifier(HideToolbarTitle(title: nav.page.title))
+            .toolbar {
+                ToolbarItemGroup(placement: .navigation) {
+                    Button { nav.goBack() } label: { Image(systemName: "chevron.left") }
+                        .disabled(nav.back.isEmpty).help("Back")
+                    Button { nav.goForward() } label: { Image(systemName: "chevron.right") }
+                        .disabled(nav.forward.isEmpty).help("Forward")
+                }
+            }
         }
-        .frame(minWidth: 780, minHeight: 580)
+        .frame(minWidth: 700, minHeight: 540)
+    }
+}
+
+/// Like System Settings, pages carry their own header card, so the toolbar shows no duplicate title.
+struct HideToolbarTitle: ViewModifier {
+    let title: String
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, *) {
+            content.navigationTitle(title).toolbar(removing: .title)
+        } else {
+            content.navigationTitle(title)
+        }
+    }
+}
+
+/// Centred header card at the top of each page (large icon, title, one-line description),
+/// matching the page headers in System Settings.
+struct PageHeader: View {
+    let page: AppNav.Page
+    let description: String
+
+    var body: some View {
+        Section {
+            VStack(spacing: 8) {
+                IconTile(symbol: page.symbol, tint: page.tint, size: 56)
+                    .padding(.bottom, 2)
+                Text(page.title).font(.title2.weight(.bold))
+                Text(description)
+                    .font(.callout).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .padding(.horizontal, 24)
+        }
     }
 }
 
@@ -45,13 +90,13 @@ struct SidebarHeader: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            IconTile(symbol: "fan.fill", tint: .blue, size: 34)
+            IconTile(symbol: "fan.fill", tint: .blue, size: 36)
             VStack(alignment: .leading, spacing: 1) {
-                Text("FanCurve").font(.headline)
-                Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text("FanCurve").font(.body.weight(.semibold))
+                Text(summary).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 
     private var summary: String {
@@ -142,6 +187,8 @@ struct FansPage: View {
 
     private var form: some View {
         Form {
+            PageHeader(page: .fans, description: "Choose how your Mac's fans respond to temperature, from silent to full speed.")
+
             Section {
                 HStack(spacing: 0) {
                     StatTile(title: "Following", value: fmt(model.currentTemp), symbol: "thermometer.medium", tint: tempTint)
@@ -255,6 +302,8 @@ struct DisplaysPage: View {
 
     private var form: some View {
         Form {
+            PageHeader(page: .displays, description: "Control the brightness of external monitors, with the keyboard or automatically from your MacBook's light sensor.")
+
             Section {
                 if displays.monitors.isEmpty {
                     HStack(spacing: 12) {
@@ -279,6 +328,7 @@ struct DisplaysPage: View {
                         HStack(spacing: 8) {
                             Image(systemName: "sun.min").foregroundStyle(.secondary)
                             Slider(value: Binding(get: { m.brightness }, set: { displays.setBrightness($0.rounded(), for: m.id) }), in: 0...100)
+                                .labelsHidden()
                             Image(systemName: "sun.max.fill").foregroundStyle(.secondary)
                         }
                         if !m.readable {
@@ -295,6 +345,8 @@ struct DisplaysPage: View {
                     Footer("Some HDMI ports and docks don't pass brightness control (DDC) through.")
                 }
             }
+
+            BrightnessKeysSection()
 
             Section {
                 Toggle(isOn: $displays.followSensor) {
@@ -332,6 +384,100 @@ struct DisplaysPage: View {
     }
 }
 
+struct BrightnessKeysSection: View {
+    @EnvironmentObject var keys: BrightnessKeys
+
+    var body: some View {
+        Section {
+            Picker("Brightness keys control", selection: $keys.mode) {
+                ForEach(BrightnessKeys.Mode.allCases) { Text($0.label).tag($0) }
+            }
+            if keys.needsPermission {
+                LabeledContent {
+                    HStack {
+                        Button("Open Accessibility Settings…") { keys.openAccessibilitySettings() }
+                        Button("Try Again") { keys.update() }
+                    }
+                } label: {
+                    StatusRow(text: "FanCurve needs Accessibility access to use the brightness keys.", color: .orange)
+                }
+            }
+        } header: {
+            Text("Brightness Keys")
+        } footer: {
+            Footer(keys.mode == .underPointer
+                   ? "The keys change whichever display the pointer is on. Hold ⌥⇧ for finer steps."
+                   : keys.mode == .all ? "The keys change the built-in and external displays together. Hold ⌥⇧ for finer steps."
+                   : "The keys only change the MacBook's own display, as usual.")
+        }
+    }
+}
+
+// MARK: - General
+
+struct GeneralPage: View {
+    @EnvironmentObject var loginItem: LoginItem
+    @EnvironmentObject var updater: Updater
+
+    var body: some View {
+        Form {
+            PageHeader(page: .general, description: "Startup and software updates for FanCurve on this Mac.")
+
+            Section {
+                Toggle("Open at login", isOn: Binding(get: { loginItem.enabled }, set: { loginItem.set($0) }))
+                if loginItem.needsApproval {
+                    LabeledContent {
+                        Button("Open Login Items…") { loginItem.openLoginItemsSettings() }
+                    } label: {
+                        StatusRow(text: "Allow FanCurve in Login Items to finish turning this on.", color: .orange)
+                    }
+                }
+                if let e = loginItem.error { StatusRow(text: e, color: .red) }
+            } header: {
+                Text("Startup")
+            } footer: {
+                Footer("FanCurve starts in the menu bar when you log in. The fan service runs regardless, so your curve applies even before you log in.")
+            }
+
+            Section {
+                LabeledContent("Current version", value: updater.currentVersion)
+                TextField("Update server", text: $updater.serverURL, prompt: Text("Address from ./serve.sh on"))
+                LabeledContent {
+                    updateAction
+                } label: {
+                    updateStatus
+                }
+            } header: {
+                Text("Software Update")
+            } footer: {
+                Footer("Paste the address that ./serve.sh on prints on the Mac you build FanCurve on. FanCurve checks it quietly every few hours, and installing asks for your administrator password because the fan service is updated too.")
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { loginItem.refresh() }
+    }
+
+    @ViewBuilder private var updateStatus: some View {
+        switch updater.state {
+        case .idle: StatusRow(text: updater.serverURL.isEmpty ? "No update server set." : "Not checked yet.", color: .secondary)
+        case .checking: StatusRow(text: "Checking…", color: .secondary)
+        case .upToDate: StatusRow(text: "FanCurve is up to date.", color: .green)
+        case .available(let v): StatusRow(text: "Version \(v) is available.", color: .blue)
+        case .downloading: StatusRow(text: "Downloading…", color: .blue)
+        case .installing: StatusRow(text: "Installing: FanCurve will restart.", color: .blue)
+        case .failed(let m): StatusRow(text: m, color: .red)
+        }
+    }
+
+    @ViewBuilder private var updateAction: some View {
+        switch updater.state {
+        case .available: Button("Install Update") { updater.install() }.buttonStyle(.borderedProminent)
+        case .checking, .downloading, .installing: ProgressView().controlSize(.small)
+        default: Button("Check Now") { updater.check(userInitiated: true) }.disabled(updater.serverURL.isEmpty)
+        }
+    }
+}
+
 // MARK: - Microphone
 
 struct MicPage: View {
@@ -339,18 +485,13 @@ struct MicPage: View {
 
     var body: some View {
         Form {
+            PageHeader(page: .mic, description: "Mute every microphone on your Mac at once, from anywhere, with a keyboard shortcut.")
+
             Section {
-                HStack(spacing: 14) {
-                    IconTile(symbol: mic.isMuted ? "mic.slash.fill" : "mic.fill", tint: mic.isMuted ? .red : .green, size: 36)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(mic.isMuted ? "Microphone muted" : "Microphone live").font(.headline)
-                        Text(mic.isMuted ? "Every input device is silenced." : "Apps can hear you.").font(.callout).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Toggle("Mute", isOn: Binding(get: { mic.isMuted }, set: { mic.setMuted($0) }))
-                        .labelsHidden().toggleStyle(.switch).controlSize(.large)
+                Toggle(isOn: Binding(get: { mic.isMuted }, set: { mic.setMuted($0) })) {
+                    Text("Mute microphone")
+                    Text(mic.isMuted ? "Every input device is silenced." : "Apps can hear you.")
                 }
-                .padding(.vertical, 4)
             } footer: {
                 Footer("Mutes the built-in mic, headsets and USB mics, including ones plugged in while muted. Apps just receive silence. Quitting FanCurve unmutes you.")
             }
@@ -383,20 +524,13 @@ struct KeyboardPage: View {
 
     var body: some View {
         Form {
+            PageHeader(page: .keyboard, description: "Clean your keyboard without typing into anything. The trackpad keeps working so you can switch it off.")
+
             Section {
-                HStack(spacing: 14) {
-                    IconTile(symbol: keyboard.isOn ? "keyboard.badge.ellipsis" : "keyboard.fill", tint: keyboard.isOn ? .orange : .gray, size: 36)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Keyboard cleaning mode").font(.headline)
-                        Text(keyboard.isOn ? "Keys are ignored. Turns off automatically in \(mmss(keyboard.secondsLeft))."
-                                           : "Ignores every key press while the trackpad keeps working.")
-                            .font(.callout).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Toggle("Cleaning mode", isOn: Binding(get: { keyboard.isOn }, set: { _ in keyboard.toggle() }))
-                        .labelsHidden().toggleStyle(.switch).controlSize(.large)
+                Toggle(isOn: Binding(get: { keyboard.isOn }, set: { _ in keyboard.toggle() })) {
+                    Text("Keyboard cleaning mode")
+                    Text(keyboard.isOn ? "Keys are ignored. Turns off automatically in \(mmss(keyboard.secondsLeft))." : "Ignores every key press.")
                 }
-                .padding(.vertical, 4)
                 if keyboard.needsPermission {
                     LabeledContent {
                         Button("Open Accessibility Settings…") { keyboard.openAccessibilitySettings() }

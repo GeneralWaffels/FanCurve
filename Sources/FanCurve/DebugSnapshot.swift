@@ -2,8 +2,8 @@
 import AppKit
 import SwiftUI
 
-/// Debug builds only: `FanCurve --snapshot <dir>` renders every settings page (light + dark) to PNGs
-/// and exits. Used to review the UI without screen-recording permission.
+/// Debug builds only: `FanCurve --snapshot <dir>` opens the real Settings window, renders every page
+/// (light + dark) to PNGs via the window server, and exits. Used to review the UI.
 @MainActor
 enum DebugSnapshot {
     static func runIfRequested() {
@@ -12,31 +12,34 @@ enum DebugSnapshot {
         let dir = URL(fileURLWithPath: args[i + 1])
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        let model = Model(), keyboard = KeyboardBlocker(), displays = Displays(), mic = MicMuter(), nav = AppNav()
-        let root = SettingsView()
-            .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 640),
-                              styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        window.title = "FanCurve Settings"
-        window.contentView = NSHostingView(rootView: root)
-        window.setFrameOrigin(NSPoint(x: -3000, y: 0))   // off-screen
-        window.orderFrontRegardless()
-
         Task {
+            try? await Task.sleep(for: .seconds(1))
+            NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil)
+            try? await Task.sleep(for: .seconds(1.5))
+            guard let window = NSApp.windows.first(where: { $0.title.contains("Settings") || $0.identifier?.rawValue.contains("settings") == true }) else { exit(1) }
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 window.appearance = NSAppearance(named: appearance)
                 for page in AppNav.Page.allCases {
-                    nav.page = page
+                    AppNav.shared.page = page
                     try? await Task.sleep(for: .milliseconds(900))
-                    guard let view = window.contentView?.superview ?? window.contentView,
-                          let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
-                    view.cacheDisplay(in: view.bounds, to: rep)
                     let name = "\(page.rawValue)-\(appearance == .aqua ? "light" : "dark").png"
-                    try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name))
+                    if let cg = windowImage(window.windowNumber) {
+                        try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name))
+                    }
                 }
             }
             exit(0)
         }
+    }
+
+    /// CGWindowListCreateImage is unavailable to Swift in the macOS 15+ SDK but still exported; fine for a debug tool.
+    /// An app may capture its own windows without screen-recording permission.
+    private static func windowImage(_ number: Int) -> CGImage? {
+        typealias Fn = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+        guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return nil }
+        let fn = unsafeBitCast(sym, to: Fn.self)
+        // listOptions: optionIncludingWindow (8); imageOptions: boundsIgnoreFraming (1) | bestResolution (8)
+        return fn(.null, 8, UInt32(number), 1 | 8)?.takeRetainedValue()
     }
 }
 #endif

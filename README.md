@@ -6,6 +6,8 @@ A Macs Fan Control–style fan curve app for Apple Silicon (built and verified o
 - **External display brightness (DDC/CI)**: a brightness slider for each external monitor, in the Displays tab and the menu bar. It works over USB-C, Thunderbolt and DisplayPort; some HDMI ports and docks don't pass DDC through.
 - **Match laptop light sensor**: sets monitor brightness from the MacBook's ambient light sensor, on a log curve between your Darkest and Brightest settings (0 lux → Darkest, 1000+ lux → Brightest). It's smoothed and only writes changes of 2% or more. It pauses while the lid is closed, because the sensor is covered. Moving a slider by hand switches it off.
 - **Global mic mute**: mutes every input device system-wide (hardware mute where available, otherwise input volume 0). It re-applies every second and when devices change, so a headset plugged in while muted is muted too. You set a custom global shortcut (default ⌃⌥M) in the Mic tab. A separate menu bar mic icon can be shown Always, Only while muted, or Never. The mic is unmuted when FanCurve quits.
+- **Brightness keys for external monitors**: the MacBook's brightness keys can control the display under the pointer, or all displays together (Displays → Brightness Keys). Steps match macOS (16 per range, ⌥⇧ for 64), with a glass brightness overlay on the monitor being changed. Needs Accessibility permission.
+- **Open at login** and **in-app updates** (Settings → General): FanCurve checks your `./serve.sh on` server every few hours and installs new versions with the standard administrator password prompt, fan service included.
 - **Keyboard cleaning mode**: a switch in the menu bar and the editor window. While it's on, every key press is ignored (including media and brightness keys) but the trackpad keeps working, so you can switch it off again. It turns itself off after 5 minutes. It needs Accessibility permission. The power button and Touch ID can't be blocked.
 - **fancurved**: a small root daemon (launchd) that reads `/Library/Application Support/FanCurve/config.json` every 2 s and drives the fans.
 
@@ -52,6 +54,9 @@ tail -f /var/log/fancurved.log
 | `F0Tg` | target RPM (float) |
 
 ## Updating your other Macs
+
+Once FanCurve is installed on a Mac, paste the server address into Settings → General → Software Update (`update.sh` already fills it in). After that, FanCurve offers **Install Update** by itself whenever you publish with `./serve.sh on`.
+
 
 On this Mac (the one with the source), start the update server:
 
