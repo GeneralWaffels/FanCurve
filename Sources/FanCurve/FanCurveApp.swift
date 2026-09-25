@@ -6,10 +6,11 @@ struct FanCurveApp: App {
     @StateObject private var model = Model()
     @StateObject private var keyboard = KeyboardBlocker()
     @StateObject private var displays = Displays()
+    @StateObject private var mic = MicMuter()
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays)
+            MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic)
         } label: {
             if keyboard.isOn {
                 Label("Keyboard off \(keyboard.secondsLeft / 60):\(String(format: "%02d", keyboard.secondsLeft % 60))", systemImage: "keyboard.badge.ellipsis")
@@ -23,11 +24,20 @@ struct FanCurveApp: App {
             TabView {
                 EditorView().tabItem { Label("Fans", systemImage: "fan") }
                 DisplaysView().tabItem { Label("Displays", systemImage: "display") }
+                MicView().tabItem { Label("Mic", systemImage: "mic") }
                 KeyboardView().tabItem { Label("Keyboard", systemImage: "keyboard") }
             }
-            .environmentObject(model).environmentObject(keyboard).environmentObject(displays)
+            .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic)
         }
         .defaultSize(width: 720, height: 600)
+
+        // Separate mic status icon; visibility follows the "Show mic icon in menu bar" setting.
+        MenuBarExtra(isInserted: $mic.showIndicator) {
+            Button(mic.isMuted ? "Unmute microphone" : "Mute microphone") { mic.toggle() }
+            if let s = mic.shortcut { Text("Shortcut: \(s.display)") }
+        } label: {
+            Image(systemName: mic.isMuted ? "mic.slash.fill" : "mic.fill")
+        }
     }
 
     @ViewBuilder private var fanLabel: some View {
@@ -42,6 +52,7 @@ struct MenuContent: View {
     @EnvironmentObject var model: Model
     @EnvironmentObject var keyboard: KeyboardBlocker
     @EnvironmentObject var displays: Displays
+    @EnvironmentObject var mic: MicMuter
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -67,6 +78,7 @@ struct MenuContent: View {
             }
         }
         Divider()
+        Toggle("Mute microphone\(mic.shortcut.map { "  (\($0.display))" } ?? "")", isOn: Binding(get: { mic.isMuted }, set: { mic.setMuted($0) }))
         Toggle("Keyboard cleaning mode", isOn: Binding(get: { keyboard.isOn }, set: { _ in keyboard.toggle() }))
         if keyboard.needsPermission {
             Button("Grant Accessibility access…") { keyboard.openAccessibilitySettings() }

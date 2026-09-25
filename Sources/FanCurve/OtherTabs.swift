@@ -63,6 +63,30 @@ struct DisplaysView: View {
     }
 }
 
+struct MicView: View {
+    @EnvironmentObject var mic: MicMuter
+
+    var body: some View {
+        Form {
+            Toggle("Mute microphone", isOn: Binding(get: { mic.isMuted }, set: { mic.setMuted($0) }))
+                .toggleStyle(.switch)
+            Text("Mutes every input device system-wide: the built-in mic, headsets and USB mics, including ones plugged in while muted. Apps like Zoom or Discord just receive silence. Your mic is unmuted again when you quit FanCurve.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            LabeledContent("Toggle shortcut") { ShortcutRecorder(shortcut: $mic.shortcut) }
+            Text("Works from any app. Use at least one of ⌘ ⌥ ⌃ ⇧, or an F-key. Esc cancels recording, Delete clears it.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            Picker("Show mic icon in menu bar", selection: $mic.indicator) {
+                ForEach(MicMuter.IndicatorMode.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.radioGroup)
+        }
+        .formStyle(.grouped)
+        .padding(8)
+    }
+}
+
 struct KeyboardView: View {
     @EnvironmentObject var keyboard: KeyboardBlocker
 
