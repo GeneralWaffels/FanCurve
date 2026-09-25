@@ -9,6 +9,8 @@ final class Model: ObservableObject {
     @Published var status: DaemonStatus?
     @Published var saveError: String?
     @Published var history: [Double] = []   // recent temps of the selected source
+    /// User-saved curves (name → points). Built-in Noctua presets are separate and can't be deleted.
+    @Published private(set) var customProfiles: [String: [CurvePoint]] = [:]
 
     let hw: Hardware?
     private var timer: Timer?
@@ -17,6 +19,8 @@ final class Model: ObservableObject {
     init() {
         hw = try? Hardware()
         config = Paths.loadConfig()
+        if let d = UserDefaults.standard.data(forKey: "customProfiles"),
+           let p = try? JSONDecoder().decode([String: [CurvePoint]].self, from: d) { customProfiles = p }
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -48,5 +52,33 @@ final class Model: ObservableObject {
         }
     }
 
-    func applyPreset(_ name: String) { if let p = FanConfig.presets[name] { config.points = p } }
+    // MARK: profiles
+
+    var customProfileNames: [String] { customProfiles.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending } }
+
+    func points(for name: String) -> [CurvePoint]? { FanConfig.presets[name] ?? customProfiles[name] }
+
+    func applyPreset(_ name: String) { if let p = points(for: name) { config.points = p } }
+
+    /// The profile whose curve matches the current one (point order doesn't matter), if any.
+    var activeProfile: String? {
+        let current = config.points.sorted { $0.temp < $1.temp }
+        return (FanConfig.presetOrder + customProfileNames).first { points(for: $0)?.sorted { $0.temp < $1.temp } == current }
+    }
+
+    func isBuiltIn(_ name: String) -> Bool { FanConfig.presets[name] != nil }
+
+    func saveProfile(named name: String) {
+        customProfiles[name] = config.points.sorted { $0.temp < $1.temp }
+        persistProfiles()
+    }
+
+    func deleteProfile(named name: String) {
+        customProfiles[name] = nil
+        persistProfiles()
+    }
+
+    private func persistProfiles() {
+        if let d = try? JSONEncoder().encode(customProfiles) { UserDefaults.standard.set(d, forKey: "customProfiles") }
+    }
 }

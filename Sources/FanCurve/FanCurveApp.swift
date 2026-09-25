@@ -61,9 +61,7 @@ struct MenuContent: View {
         ForEach(model.fans) { f in Text("Fan \(f.id + 1): \(Int(f.actual)) rpm") }
         Divider()
         Toggle("Use fan curve", isOn: $model.config.enabled)
-        Menu("Preset") {
-            ForEach(FanConfig.presetOrder, id: \.self) { name in Button(name) { model.applyPreset(name) } }
-        }
+        ProfileMenu()
         Button("Edit curve…") { nav.open(.fans, openWindow) }
         Divider()
         if displays.monitors.isEmpty {
@@ -135,9 +133,8 @@ struct EditorView: View {
                 }
                 .frame(maxWidth: 320)
                 Spacer()
-                Menu("Preset") {
-                    ForEach(FanConfig.presetOrder, id: \.self) { name in Button(name) { model.applyPreset(name) } }
-                }
+                Text("Profile").foregroundStyle(.secondary)
+                ProfileMenu()
                 .fixedSize()
             }
 
