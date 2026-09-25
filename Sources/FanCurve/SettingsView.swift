@@ -11,12 +11,19 @@ struct SettingsView: View {
         NavigationSplitView {
             // Only write back real changes: republishing an unchanged value makes SwiftUI re-render in a loop.
             List(selection: Binding(get: { Optional(nav.page) }, set: { if let p = $0, p != nav.page { nav.page = p } })) {
+                SidebarHeader()
+                    .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 12, trailing: 4))
+                    .selectionDisabled()
                 ForEach(AppNav.Page.allCases) { page in
                     Label { Text(page.title) } icon: { IconTile(symbol: page.symbol, tint: page.tint) }
+                        .padding(.vertical, 1)
                         .tag(page)
                 }
             }
-            .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 260)
+            .listStyle(.sidebar)
+            .contentMargins(.horizontal, 10, for: .scrollContent)
+            .contentMargins(.top, 6, for: .scrollContent)
+            .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 280)
         } detail: {
             Group {
                 switch nav.page {
@@ -32,6 +39,28 @@ struct SettingsView: View {
     }
 }
 
+/// App identity row at the top of the sidebar, like the Apple Account row in System Settings.
+struct SidebarHeader: View {
+    @EnvironmentObject var model: Model
+
+    var body: some View {
+        HStack(spacing: 10) {
+            IconTile(symbol: "fan.fill", tint: .blue, size: 34)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("FanCurve").font(.headline)
+                Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var summary: String {
+        let temp = model.currentTemp.map { "\(Int($0.rounded())) °C" } ?? "--"
+        guard model.config.enabled else { return "\(temp) · macOS" }
+        return model.status?.mode == "curve" ? "\(temp) · Curve active" : "\(temp) · Fans idle"
+    }
+}
+
 /// Rounded, tinted SF Symbol tile like the ones in System Settings' sidebar.
 struct IconTile: View {
     let symbol: String
@@ -44,17 +73,6 @@ struct IconTile: View {
             .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(RoundedRectangle(cornerRadius: size * 0.27, style: .continuous).fill(tint.gradient))
-    }
-}
-
-extension View {
-    /// Liquid Glass card on macOS 26+, regular material before that.
-    @ViewBuilder func glassCard(cornerRadius: CGFloat = 14) -> some View {
-        if #available(macOS 26.0, *) {
-            self.glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        } else {
-            self.background(.regularMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        }
     }
 }
 
@@ -75,8 +93,17 @@ struct StatTile: View {
             Text(value).font(.system(.title2, design: .rounded).weight(.semibold).monospacedDigit())
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .glassCard()
+        .padding(.vertical, 6)
+    }
+}
+
+/// Section footer text, leading-aligned like System Settings (grouped Form footers default to trailing).
+struct Footer: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+    var body: some View {
+        Text(text).font(.footnote).foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -86,12 +113,18 @@ struct StatusRow: View {
     let color: Color
 
     var body: some View {
-        HStack(spacing: 8) {
-            Circle().fill(color).frame(width: 8, height: 8)
-            Text(text).foregroundStyle(.secondary)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(text).foregroundStyle(.secondary).multilineTextAlignment(.leading)
         }
-        .font(.callout)
+        .font(.footnote)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+/// Slider binding that snaps to a step without drawing tick marks (like System Settings' sliders).
+func rounded(_ b: Binding<Double>, to step: Double) -> Binding<Double> {
+    Binding(get: { b.wrappedValue }, set: { b.wrappedValue = ($0 / step).rounded() * step })
 }
 
 func mmss(_ seconds: Int) -> String { "\(seconds / 60):\(String(format: "%02d", seconds % 60))" }
@@ -102,17 +135,21 @@ struct FansPage: View {
     @EnvironmentObject var model: Model
 
     var body: some View {
+        form
+            .onAppear { model.liveUpdates = true }
+            .onDisappear { model.liveUpdates = false }
+    }
+
+    private var form: some View {
         Form {
             Section {
-                HStack(spacing: 10) {
+                HStack(spacing: 0) {
                     StatTile(title: "Following", value: fmt(model.currentTemp), symbol: "thermometer.medium", tint: tempTint)
                     StatTile(title: "Target", value: targetText, symbol: "target", tint: .blue)
                     ForEach(model.fans) { f in
                         StatTile(title: "Fan \(f.id + 1)", value: f.actual < 100 ? "Off" : "\(Int(f.actual)) rpm", symbol: "fan", tint: .teal)
                     }
                 }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
             }
 
             Section {
@@ -135,22 +172,39 @@ struct FansPage: View {
             } header: {
                 Text("Curve")
             } footer: {
-                Text("Drag points to shape the curve, double-click to add one, right-click a point to delete it.")
+                Footer(curveSummary + " Drag points to reshape the curve, double-click to add one, right-click a point to delete it.")
             }
 
-            Section("Behaviour") {
+            Section {
                 LabeledContent("Smoothing") {
                     HStack {
-                        Slider(value: $model.config.smoothing, in: 1...20, step: 1).frame(width: 180)
+                        Slider(value: rounded($model.config.smoothing, to: 1), in: 1...20).frame(width: 180)
                         Text("\(Int(model.config.smoothing)) s").monospacedDigit().foregroundStyle(.secondary).frame(width: 36, alignment: .trailing)
+                    }
+                }
+                LabeledContent("Spin-up delay") {
+                    HStack {
+                        Slider(value: rounded($model.config.spinUpDelay, to: 5), in: 0...60).frame(width: 180)
+                        Text("\(Int(model.config.spinUpDelay)) s").monospacedDigit().foregroundStyle(.secondary).frame(width: 36, alignment: .trailing)
                     }
                 }
                 LabeledContent("Always max above") {
                     Stepper("\(Int(model.config.criticalTemp)) °C", value: $model.config.criticalTemp, in: 80...105, step: 1)
                 }
+            } header: {
+                Text("Behaviour")
+            } footer: {
+                Footer("Smoothing evens out quick temperature swings. Idle fans wait for the spin-up delay before starting, so short bursts of work don't wake them. Above the maximum temperature, fans always run flat out.")
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var curveSummary: String {
+        guard let start = model.config.startTemp(fanMin: model.fanMin) else { return "This curve keeps the fans off." }
+        if start <= 20.5 { return "This curve keeps the fans running at all times." }
+        let delay = Int(model.config.spinUpDelay)
+        return "Fans start at \(Int(start.rounded())) °C\(delay > 0 ? " after \(delay) s" : "") and stop below \(Int((start - 3).rounded())) °C."
     }
 
     private var tempTint: Color {
@@ -177,7 +231,12 @@ struct FansPage: View {
             case "curve": StatusRow(text: "Fan service is applying your curve.", color: .green)
             case "critical": StatusRow(text: "Above \(Int(model.config.criticalTemp)) °C: fans at maximum.", color: .red)
             case "error": StatusRow(text: "Fan service error: \(s.message ?? "unknown"). macOS is in control.", color: .red)
-            default: StatusRow(text: model.config.enabled ? "Below the curve's minimum: macOS is idling the fans." : "macOS is controlling the fans.", color: .secondary)
+            default:
+                if let m = s.message, m.hasPrefix("waiting") {
+                    StatusRow(text: "Warming up: " + m.replacingOccurrences(of: "waiting — ", with: "") + ".", color: .orange)
+                } else {
+                    StatusRow(text: model.config.enabled ? "Fans are idle. macOS keeps them off until the curve needs them." : "macOS is controlling the fans.", color: .secondary)
+                }
             }
         }
     }
@@ -189,14 +248,25 @@ struct DisplaysPage: View {
     @EnvironmentObject var displays: Displays
 
     var body: some View {
+        form
+            .onAppear { displays.pageVisible = true }
+            .onDisappear { displays.pageVisible = false }
+    }
+
+    private var form: some View {
         Form {
             Section {
                 if displays.monitors.isEmpty {
-                    ContentUnavailableView {
-                        Label("No External Displays", systemImage: "display.trianglebadge.exclamationmark")
-                    } description: {
-                        Text("Brightness control works over USB-C, Thunderbolt and DisplayPort. Some HDMI ports and docks don't pass DDC through.")
+                    HStack(spacing: 12) {
+                        IconTile(symbol: "display", tint: .gray, size: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("No external displays connected")
+                            Text("Works over USB-C, Thunderbolt and DisplayPort.").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Rescan") { displays.rescan() }
                     }
+                    .padding(.vertical, 2)
                 }
                 ForEach(displays.monitors) { m in
                     VStack(alignment: .leading, spacing: 6) {
@@ -219,10 +289,10 @@ struct DisplaysPage: View {
                     .padding(.vertical, 4)
                 }
             } header: {
-                HStack {
-                    Text("External Displays")
-                    Spacer()
-                    Button("Rescan") { displays.rescan() }.controlSize(.small)
+                Text("External Displays")
+            } footer: {
+                if !displays.monitors.isEmpty {
+                    Footer("Some HDMI ports and docks don't pass brightness control (DDC) through.")
                 }
             }
 
@@ -247,7 +317,7 @@ struct DisplaysPage: View {
                 if displays.sensorPaused {
                     StatusRow(text: "Lid closed: the sensor is covered, so brightness is held.", color: .orange)
                 } else {
-                    Text("A dark room uses Darkest; \(Int(Displays.fullBrightLux)) lux or more (bright office, daylight) uses Brightest. Moving a slider by hand turns this off.")
+                    Footer("A dark room uses Darkest; \(Int(Displays.fullBrightLux)) lux or more (bright office, daylight) uses Brightest. Moving a slider by hand turns this off.")
                 }
             }
         }
@@ -256,7 +326,7 @@ struct DisplaysPage: View {
 
     private func percentSlider(_ value: Binding<Double>) -> some View {
         HStack {
-            Slider(value: value, in: 0...100, step: 1).frame(width: 200)
+            Slider(value: Binding(get: { value.wrappedValue }, set: { value.wrappedValue = $0.rounded() }), in: 0...100).frame(width: 200)
             Text("\(Int(value.wrappedValue))%").monospacedDigit().foregroundStyle(.secondary).frame(width: 40, alignment: .trailing)
         }
     }
@@ -282,7 +352,7 @@ struct MicPage: View {
                 }
                 .padding(.vertical, 4)
             } footer: {
-                Text("Mutes the built-in mic, headsets and USB mics, including ones plugged in while muted. Apps just receive silence. Quitting FanCurve unmutes you.")
+                Footer("Mutes the built-in mic, headsets and USB mics, including ones plugged in while muted. Apps just receive silence. Quitting FanCurve unmutes you.")
             }
 
             Section {
@@ -293,7 +363,7 @@ struct MicPage: View {
             } header: {
                 Text("Keyboard Shortcut")
             } footer: {
-                Text("Works from any app. Use at least one of ⌘ ⌥ ⌃ ⇧, or an F-key. Esc cancels recording, Delete clears it.")
+                Footer("Works from any app. Use at least one of ⌘ ⌥ ⌃ ⇧, or an F-key. Esc cancels recording, Delete clears it.")
             }
 
             Section("Menu Bar") {
@@ -335,7 +405,7 @@ struct KeyboardPage: View {
                     }
                 }
             } footer: {
-                Text("Use the trackpad to switch it off, or wait \(keyboard.timeout / 60) minutes. The power button and Touch ID can't be blocked.")
+                Footer("Use the trackpad to switch it off, or wait \(keyboard.timeout / 60) minutes. The power button and Touch ID can't be blocked.")
             }
         }
         .formStyle(.grouped)

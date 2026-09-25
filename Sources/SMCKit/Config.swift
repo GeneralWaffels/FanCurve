@@ -15,8 +15,31 @@ public struct FanConfig: Codable, Equatable {
     public var smoothing: Double = 6
     /// Above this temperature fans always go to max, regardless of the curve.
     public var criticalTemp: Double = 95
+    /// Idle fans only start once the curve has asked for them continuously this long (seconds),
+    /// so short bursts (app launches, page loads) don't wake them. Critical temps bypass it.
+    public var spinUpDelay: Double = 15
 
     public init() {}
+
+    // Tolerant decoding: settings added in later versions fall back to defaults instead of
+    // making an older config.json fail to load (which would silently reset the user's curve).
+    private enum CodingKeys: String, CodingKey { case enabled, source, points, smoothing, criticalTemp, spinUpDelay }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = FanConfig()
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? d.enabled
+        source = (try? c.decodeIfPresent(TempSource.self, forKey: .source)) ?? d.source
+        points = try c.decodeIfPresent([CurvePoint].self, forKey: .points) ?? d.points
+        smoothing = try c.decodeIfPresent(Double.self, forKey: .smoothing) ?? d.smoothing
+        criticalTemp = try c.decodeIfPresent(Double.self, forKey: .criticalTemp) ?? d.criticalTemp
+        spinUpDelay = try c.decodeIfPresent(Double.self, forKey: .spinUpDelay) ?? d.spinUpDelay
+    }
+
+    /// Lowest temperature at which the curve asks for at least `fanMin` rpm (i.e. where fans start), if any.
+    public func startTemp(fanMin: Double) -> Double? {
+        stride(from: 20.0, through: 110, by: 0.1).first { rpm(at: $0) >= fanMin }
+    }
 
     public static let presetOrder = ["Noctua Quiet", "Noctua Balanced", "Noctua Performance"]
 

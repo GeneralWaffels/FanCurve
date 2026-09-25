@@ -24,6 +24,7 @@ Then turn on **Use fan curve** in the menu bar or the editor window.
 - **Temperature source**: the hottest CPU core by default (`Tp*`, `Ts*` and `Tm*` SMC sensors, 73 on the M5 Pro). CPU average, GPU hottest (`Tg*`) and hottest-of-both are also available.
 - **Presets**: Noctua Quiet, Balanced and Performance. These are Noctua's recommended curves, tweaked for a laptop with a fans-off zone at low temperatures.
 - **Curve**: linear interpolation between your points. Any point below the fan minimum (2317 RPM) means "fans off": control goes back to macOS so the fans can idle silently. A 3 °C hysteresis stops them flapping on and off.
+- **Spin-up delay**: idle fans only start once the curve has wanted them for 15 s in a row (adjustable 0–60 s), so short bursts don't wake them. Critical temperatures skip the delay. The Fans page shows exactly where your curve starts and stops the fans.
 - **Smoothing**: exponential smoothing on the temperature. Rising temps react 3× faster than falling ones.
 - **Safety**: above the critical temperature (95 °C by default) the fans go to max. If a temperature read or fan write fails, the daemon quits, or you disable the curve, the fans go back to macOS auto. The SoC's own thermal throttling always stays active.
 

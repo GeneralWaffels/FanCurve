@@ -27,6 +27,8 @@ final class Displays: ObservableObject {
     private let queue = DispatchQueue(label: "fancurve.ddc")
     private let defaults = UserDefaults.standard
     private var timer: Timer?
+    /// The Displays page is on screen: keep the lux readout live even when not following the sensor.
+    var pageVisible = false { didSet { if pageVisible && !oldValue { applySensor(force: false) } } }
 
     /// Lux at which the sensor mapping reaches max brightness (bright office / window light).
     static let fullBrightLux = 1000.0
@@ -40,8 +42,9 @@ final class Displays: ObservableObject {
             Task { @MainActor in try? await Task.sleep(for: .seconds(2)); self?.rescan() }   // give DCP time to bring the link up
         }
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.applySensor(force: false) }
+            MainActor.assumeIsolated { self?.applySensor(force: false) }
         }
+        timer?.tolerance = 0.5
     }
 
     func rescan() {
@@ -85,6 +88,8 @@ final class Displays: ObservableObject {
     }
 
     private func applySensor(force: Bool) {
+        // Nothing to do unless we're following the sensor or showing it (saves sensor + display polling).
+        guard followSensor || pageVisible else { return }
         let builtInActive = NSScreen.screens.contains { screen in
             (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID).map { CGDisplayIsBuiltin($0) != 0 } ?? false
         }

@@ -45,19 +45,29 @@ let interval = 2.0
 let hysteresis = 3.0          // °C below the activation point before handing back to macOS
 var smoothed: Double?
 var active = false            // true while we hold manual control
+var wantedSince: Date?        // when the curve first asked for fans while idle (spin-up delay)
+
+func log(_ msg: String) {
+    let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    print("\(f.string(from: Date())) \(msg)")
+}
 var lastConfigMTime: Date?
 var config = Paths.loadConfig()
 
-func handBack() {
-    if active || hw.fans().contains(where: \.manual) { hw.setAllAuto() }
+func handBack(_ reason: String? = nil) {
+    if active || hw.fans().contains(where: \.manual) {
+        hw.setAllAuto()
+        if active { log("fans → macOS\(reason.map { " (\($0))" } ?? "")") }
+    }
     active = false
+    wantedSince = nil
 }
 
 var signalSources: [DispatchSourceSignal] = []
 for sig in [SIGTERM, SIGINT, SIGHUP] {
     signal(sig, SIG_IGN)
     let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
-    src.setEventHandler { handBack(); print("signal \(sig): fans returned to auto"); exit(0) }
+    src.setEventHandler { handBack("signal \(sig)"); log("stopped"); exit(0) }
     src.resume()
     signalSources.append(src)
 }
@@ -67,7 +77,7 @@ func reloadConfigIfChanged() {
     guard mtime != lastConfigMTime else { return }
     lastConfigMTime = mtime
     config = Paths.loadConfig()
-    print("config loaded: enabled=\(config.enabled) source=\(config.source.rawValue) points=\(config.points.map { "\(Int($0.temp))°:\(Int($0.rpm))" })")
+    log("config loaded: enabled=\(config.enabled) source=\(config.source.rawValue) points=\(config.points.map { "\(Int($0.temp))°:\(Int($0.rpm))" })")
 }
 
 func tick() {
@@ -75,7 +85,7 @@ func tick() {
     let raw = hw.temperature(config.source)
 
     guard config.enabled else {
-        handBack()
+        handBack("curve disabled")
         Paths.save(DaemonStatus(updated: Date(), temp: raw, smoothedTemp: nil, targetRPM: nil, mode: "auto", message: "curve disabled"))
         return
     }
@@ -99,14 +109,28 @@ func tick() {
 
     if temp >= config.criticalTemp {
         target = fanMax; mode = "critical"
+        if !active { log(String(format: "critical %.1f °C → fans max", temp)) }
     } else {
         target = config.rpm(at: t)
         // Below the fan's minimum spin speed the curve means "let macOS idle the fans".
         let wantActive = active ? config.rpm(at: t + hysteresis) >= fanMin : target >= fanMin
         if !wantActive {
-            handBack()
+            handBack(String(format: "%.1f °C, below curve minimum", t))
             Paths.save(DaemonStatus(updated: Date(), temp: temp, smoothedTemp: t, targetRPM: nil, mode: "auto", message: "below curve minimum — macOS idle"))
             return
+        }
+        // Spin-up delay: from idle, the curve must want fans continuously for spinUpDelay seconds.
+        if !active {
+            let since = wantedSince ?? Date()
+            wantedSince = since
+            let waited = Date().timeIntervalSince(since)
+            if waited < config.spinUpDelay {
+                if active || hw.fans().contains(where: \.manual) { hw.setAllAuto() }
+                Paths.save(DaemonStatus(updated: Date(), temp: temp, smoothedTemp: t, targetRPM: nil, mode: "auto",
+                                        message: String(format: "waiting — fans start in %.0f s if it stays warm", config.spinUpDelay - waited)))
+                return
+            }
+            log(String(format: "%.1f °C → fans on (%.0f rpm)", t, max(target, fanMin)))
         }
     }
     target = min(max(target, fanMin), fanMax)
@@ -122,7 +146,7 @@ func tick() {
 }
 
 try? FileManager.default.createDirectory(at: Paths.dir, withIntermediateDirectories: true)
-print("fancurved started — \(hw.fanCount) fans, \(hw.cpuKeys.count) CPU sensors, \(hw.gpuKeys.count) GPU sensors")
+log("fancurved started — \(hw.fanCount) fans, \(hw.cpuKeys.count) CPU sensors, \(hw.gpuKeys.count) GPU sensors")
 let timer = DispatchSource.makeTimerSource(queue: .main)
 timer.schedule(deadline: .now(), repeating: interval)
 timer.setEventHandler(handler: tick)

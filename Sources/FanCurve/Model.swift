@@ -21,9 +21,19 @@ final class Model: ObservableObject {
         if let d = UserDefaults.standard.data(forKey: "customProfiles"),
            let p = try? JSONDecoder().decode([String: [CurvePoint]].self, from: d) { customProfiles = p }
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+        startTimer()
+    }
+
+    /// 1 s updates while the Fans page is on screen (live curve marker), 3 s otherwise
+    /// (menu bar temperature only) to keep background SMC reads low.
+    var liveUpdates = false { didSet { if liveUpdates != oldValue { startTimer(); if liveUpdates { refresh() } } } }
+
+    private func startTimer() {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: liveUpdates ? 1 : 3, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refresh() }
         }
+        timer?.tolerance = liveUpdates ? 0.1 : 0.5   // lets macOS coalesce wakeups
     }
 
     var currentTemp: Double? { temps[config.source] }

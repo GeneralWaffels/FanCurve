@@ -127,7 +127,7 @@ struct ShortcutRecorder: View {
             Button(state.recording ? "Press shortcut…" : (shortcut?.display ?? "Record shortcut")) {
                 state.recording ? state.stop() : state.start(onKey: handle)
             }
-            .frame(minWidth: 130)
+            .fixedSize()
             if shortcut != nil && !state.recording {
                 Button { shortcut = nil } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.borderless).help("Clear shortcut")

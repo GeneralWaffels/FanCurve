@@ -5,6 +5,12 @@ import SMCKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static let openSettings = Notification.Name("FanCurveOpenSettings")
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        MainActor.assumeIsolated { DebugSnapshot.runIfRequested() }
+        #endif
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         NotificationCenter.default.post(name: Self.openSettings, object: nil)
         return false
