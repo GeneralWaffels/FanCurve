@@ -126,6 +126,9 @@ A Raycast-style glass search panel:
 - **Context:** it uses the text before your cursor, the app you're in, and optionally the visible text in the window.
 - **Personalisation:** your writing-style prompt, plus examples of your own writing (lines you finish and suggestions you accept). Optionally it also learns names and terms that keep appearing on screen, checking every few minutes; it keeps vocabulary only, never whole sentences. All of it is stored locally.
 - **Skipped:** password fields, and any app you exclude.
+- **Works everywhere:** in apps that don't expose their text (VS Code, some browsers and Electron apps), FanCurve tracks what you type itself and shows the suggestion in a small bubble.
+- **Also included:** emoji completion (`:smile` → 😄), autocorrect for misspelt words, short, medium or long suggestions, a choice of Tab or → to accept, a *Suggest now* shortcut, per-app switches, and word stats.
+- **On battery:** it can switch to Apple's on-device model, stopping llama.cpp to save power and about 3.5 GB of memory, or pause until you plug in.
 - **Setup:** `brew install llama.cpp`, then put a `.gguf` model in `~/Library/Application Support/FanCurve/Models` (or import one from Cotypist).
 
 ### Displays

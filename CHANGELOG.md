@@ -5,6 +5,10 @@ FanCurve uses date-based versions (`YYYY.MM.DD.HHMM`). See [Releases](../../rele
 ## 2026-09-26
 
 ### Added
+- **Autocomplete now works in more apps:**
+  - A typing buffer and a bubble display cover apps that don't expose their text, such as VS Code and Electron apps.
+  - New features: emoji completion, autocorrect, a length setting, a choice of accept key, a Suggest now shortcut, per-app switches, word stats, and a live status line.
+  - On battery, it can switch to Apple's on-device model or pause.
 - **AI autocomplete:** local llama.cpp + GGUF model with ghost text at the cursor (Tab / ⌥→ / Esc). It uses screen context and a style prompt, and personalises from local history. Imports Cotypist's model and style.
 - **Shortcuts for AeroSpace layouts** (⌃⌥Q, ⌃⌥W).
 - **AeroSpace layouts:** width commands (½ ⅓ ¼ ⅔ ¾) and two presets, Half + Two Quarters (stacked) and Half + Two Quarter Columns.

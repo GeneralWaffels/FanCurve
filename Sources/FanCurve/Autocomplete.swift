@@ -1,7 +1,11 @@
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
+import IOKit.ps
 import SwiftUI
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
 
 /// Cotypist-style AI autocomplete that runs entirely on this Mac.
 ///
@@ -24,6 +28,35 @@ final class Autocomplete: ObservableObject {
     @Published var excludedApps: [String] { didSet { save() } }
     @Published var modelFile: String { didSet { save(); if enabled { restartServer() } } }
 
+    enum Length: String, CaseIterable, Identifiable {
+        case short, medium, long
+        var id: String { rawValue }
+        var tokens: Int { self == .short ? 8 : self == .medium ? 18 : 40 }
+        var label: String { self == .short ? "A few words" : self == .medium ? "Part of a sentence" : "Up to a full sentence" }
+    }
+    enum AcceptKey: String, CaseIterable, Identifiable {
+        case tab, rightArrow
+        var id: String { rawValue }
+        var label: String { self == .tab ? "Tab" : "→ Right Arrow" }
+    }
+    enum BatteryMode: String, CaseIterable, Identifiable {
+        case apple, gemma, pause
+        var id: String { rawValue }
+        var label: String { self == .apple ? "Apple's on-device model" : self == .gemma ? "Keep using the selected model" : "Pause autocomplete" }
+    }
+    /// What to use while running on battery: Apple's built-in model is far lighter on power than llama.cpp.
+    @Published var batteryMode: BatteryMode { didSet { save(); updatePower() } }
+    @Published private(set) var onBattery = false
+    /// True while suggestions come from Apple's on-device model instead of llama.cpp.
+    @Published private(set) var usingApple = false
+    private var powerSource: CFRunLoopSource?
+    private var appleTask: Task<Void, Never>?
+
+    @Published var length: Length { didSet { save() } }
+    @Published var acceptKey: AcceptKey { didSet { save() } }
+    @Published var emoji: Bool { didSet { save() } }
+    @Published var autocorrect: Bool { didSet { save() } }
+
     // MARK: state
     @Published private(set) var engine: EngineState = .off
     @Published private(set) var accepted = 0
@@ -32,6 +65,12 @@ final class Autocomplete: ObservableObject {
     struct Term: Codable { var count: Int; var lastSeen: Date }
     private var screenTimer: Timer?
     @Published private(set) var lastLatency: Int?
+    /// Plain-English description of what autocomplete just did (shown in Settings).
+    @Published private(set) var status = "Off"
+    @Published private(set) var wordsToday = 0
+    @Published private(set) var wordsTotal = 0
+    /// Apps it has run in (bundle id → name), for the per-app switches in Settings.
+    @Published private(set) var seenApps: [String: String] = [:]
 
     let folder: URL
     var modelsFolder: URL { folder.appendingPathComponent("Models") }
@@ -42,7 +81,9 @@ final class Autocomplete: ObservableObject {
     private var tapSource: CFRunLoopSource?
     private var debounce: Task<Void, Never>?
     private var request: URLSessionDataTask?
-    private var suggestion: (text: String, element: AXUIElement, value: String, caret: Int)?
+    private var suggestion: Suggestion?
+    private var buffer = ""
+    private var bufferPID: pid_t = 0
     private let ghost = GhostText()
     private var history: [String] = []
 
@@ -65,6 +106,14 @@ final class Autocomplete: ObservableObject {
         excludedApps = defaults.stringArray(forKey: "acExcluded") ?? Self.defaultExcluded
         modelFile = defaults.string(forKey: "acModel") ?? ""
         accepted = defaults.integer(forKey: "acAccepted")
+        length = Length(rawValue: defaults.string(forKey: "acLength") ?? "") ?? .medium
+        batteryMode = BatteryMode(rawValue: defaults.string(forKey: "acBattery") ?? "") ?? (Self.appleModelAvailable ? .apple : .gemma)
+        acceptKey = AcceptKey(rawValue: defaults.string(forKey: "acAcceptKey") ?? "") ?? .tab
+        emoji = defaults.object(forKey: "acEmoji") as? Bool ?? true
+        autocorrect = defaults.object(forKey: "acAutocorrect") as? Bool ?? true
+        wordsTotal = defaults.integer(forKey: "acWordsTotal")
+        wordsToday = defaults.string(forKey: "acWordsDay") == Self.dayKey() ? defaults.integer(forKey: "acWordsToday") : 0
+        seenApps = defaults.dictionary(forKey: "acSeenApps") as? [String: String] ?? [:]
         try? FileManager.default.createDirectory(at: folder.appendingPathComponent("Models"), withIntermediateDirectories: true)
         loadHistory()
         loadVocabulary()
@@ -72,6 +121,7 @@ final class Autocomplete: ObservableObject {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.server?.terminate() }
         }
+        watchPower()
         if enabled { start() }
     }
 
@@ -83,6 +133,11 @@ final class Autocomplete: ObservableObject {
         defaults.set(learnFromScreen, forKey: "acLearnScreen")
         defaults.set(excludedApps, forKey: "acExcluded")
         defaults.set(modelFile, forKey: "acModel")
+        defaults.set(length.rawValue, forKey: "acLength")
+        defaults.set(batteryMode.rawValue, forKey: "acBattery")
+        defaults.set(acceptKey.rawValue, forKey: "acAcceptKey")
+        defaults.set(emoji, forKey: "acEmoji")
+        defaults.set(autocorrect, forKey: "acAutocorrect")
     }
 
     // MARK: models & engine
@@ -112,7 +167,8 @@ final class Autocomplete: ObservableObject {
     private func start() {
         guard !paused else { return }
         installTap()
-        restartServer()
+        onBattery = Self.isOnBattery
+        applyEngineForPower()
         updateScreenLearning()
     }
 
@@ -120,8 +176,10 @@ final class Autocomplete: ObservableObject {
         screenTimer?.invalidate(); screenTimer = nil
         removeTap()
         hide()
-        server?.terminate(); server = nil
+        stopServer()
+        usingApple = false
         engine = .off
+        setStatus("Off")
     }
 
     func restartServer() {
@@ -157,14 +215,77 @@ final class Autocomplete: ObservableObject {
         return String(decoding: d, as: UTF8.self).contains("ok")
     }
 
+    // MARK: power (battery → Apple's model)
+
+    static var isOnBattery: Bool {
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else { return false }
+        return (IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String?) == kIOPSBatteryPowerValue
+    }
+
+    static var appleModelAvailable: Bool {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            if case .available = SystemLanguageModel.default.availability { return true }
+        }
+        #endif
+        return false
+    }
+
+    private func watchPower() {
+        let ctx = Unmanaged.passUnretained(self).toOpaque()
+        guard let src = IOPSNotificationCreateRunLoopSource({ ctx in
+            guard let ctx else { return }
+            let me = Unmanaged<Autocomplete>.fromOpaque(ctx).takeUnretainedValue()
+            MainActor.assumeIsolated { me.updatePower() }
+        }, ctx)?.takeRetainedValue() else { return }
+        powerSource = src
+        CFRunLoopAddSource(CFRunLoopGetMain(), src, .defaultMode)
+    }
+
+    private func updatePower() {
+        let battery = Self.isOnBattery
+        if battery != onBattery { onBattery = battery }
+        if enabled && !paused { applyEngineForPower() }
+    }
+
+    /// On battery: Apple's model (llama.cpp stopped), pause, or keep going. On power: the selected model.
+    private func applyEngineForPower() {
+        if onBattery && batteryMode == .apple && Self.appleModelAvailable {
+            if !usingApple {
+                usingApple = true
+                stopServer()
+                engine = .ready
+                setStatus("On battery: using Apple's on-device model")
+            }
+        } else if onBattery && batteryMode == .pause {
+            usingApple = false
+            stopServer()
+            engine = .off
+            setStatus("Paused while on battery")
+        } else if usingApple || engine != .ready || !onBattery {
+            usingApple = false
+            if engine != .ready || server == nil { restartServer() }
+        }
+    }
+
+    /// Stops llama-server, including one left running by a previous launch, to save power and memory.
+    private func stopServer() {
+        server?.terminate(); server = nil
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        p.arguments = ["-f", "llama-server.*--port \(port)"]
+        try? p.run()
+    }
+
     /// Loads the style prompt into the model's cache so the first real suggestion is fast.
-    private func warmUp() { complete(prompt: buildPrompt(prefix: "Hello", app: "Notes", window: nil, screen: nil)) { _, _ in } }
+    private func warmUp() { complete(prompt: buildPrompt(prefix: "Hello", app: "Notes", window: nil, screen: nil), tokens: 4) { _, _ in } }
 
     // MARK: key handling
 
     private func installTap() {
         guard tap == nil else { return }
         guard AXIsProcessTrusted() else {
+            setStatus("Waiting for Accessibility access")
             AccessibilityPermission.shared.request()
             AccessibilityPermission.shared.whenGranted { [weak self] in if self?.enabled == true { self?.installTap() } }
             return
@@ -183,11 +304,15 @@ final class Autocomplete: ObservableObject {
         }
         guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                         eventsOfInterest: mask, callback: callback,
-                                        userInfo: Unmanaged.passUnretained(self).toOpaque()) else { return }
+                                        userInfo: Unmanaged.passUnretained(self).toOpaque()) else {
+            setStatus("Couldn't watch the keyboard: check Accessibility access")
+            return
+        }
         tap = t
         tapSource = CFMachPortCreateRunLoopSource(nil, t, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), tapSource, .commonModes)
         CGEvent.tapEnable(tap: t, enable: true)
+        setStatus("Ready: start typing in any app")
     }
 
     private func removeTap() {
@@ -196,88 +321,165 @@ final class Autocomplete: ObservableObject {
         tap = nil; tapSource = nil
     }
 
-    /// Returns true to swallow the event (only Tab / ⌥→ / Esc while a suggestion is showing).
+    /// Returns true to swallow the event (only the accept / dismiss keys while a suggestion is showing).
     private func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
-        guard type == .keyDown else { hide(); return false }
+        guard type == .keyDown else { buffer = ""; hide(); return false }   // a click moves the caret
         if event.getIntegerValueField(.eventSourceUserData) == Paster.marker { return false }
         let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let flags = event.flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
 
-        if suggestion != nil {
-            if code == kVK_Tab && flags.isEmpty { acceptAll(); return true }
-            if code == kVK_RightArrow && flags == .maskAlternate { acceptWord(); return true }
-            if code == kVK_Escape && flags.isEmpty { hide(); return true }
+        if let s = suggestion {
+            let full = acceptKey == .tab ? (code == kVK_Tab && flags.isEmpty) : (code == kVK_RightArrow && flags.isEmpty)
+            if full { accept(s, wordOnly: false); return true }
+            if s.kind == .completion && code == kVK_RightArrow && flags == .maskAlternate { accept(s, wordOnly: true); return true }
+            if code == kVK_Escape && flags.isEmpty { hide(); setStatus("Dismissed"); return true }
         }
         hide()
+        track(event, code: code, flags: flags)
         guard enabled, !paused, engine == .ready else { return false }
         if flags.contains(.maskCommand) || flags.contains(.maskControl) { return false }
         switch code {
-        case kVK_Return, kVK_Tab, kVK_Escape, kVK_UpArrow, kVK_DownArrow, kVK_LeftArrow, kVK_RightArrow, kVK_Delete, kVK_ForwardDelete:
-            if code == kVK_Return { DispatchQueue.main.async { self.rememberCurrentLine() } }
+        case kVK_Return:
+            DispatchQueue.main.async { self.rememberCurrentLine() }
+            return false
+        case kVK_Tab, kVK_Escape, kVK_UpArrow, kVK_DownArrow, kVK_LeftArrow, kVK_RightArrow, kVK_Delete, kVK_ForwardDelete,
+             kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown:
             return false
         default: break
         }
-        scheduleSuggestion()
+        scheduleSuggestion(force: false)
         return false
     }
 
-    private func scheduleSuggestion() {
+    /// Keeps our own record of what's typed in the frontmost app, for apps (VS Code, some browsers,
+    /// Electron) that don't expose their text through Accessibility.
+    private func track(_ event: CGEvent, code: Int, flags: CGEventFlags) {
+        let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+        if pid != bufferPID { buffer = ""; bufferPID = pid }
+        if flags.contains(.maskCommand) || flags.contains(.maskControl) { buffer = ""; return }   // paste, undo…
+        switch code {
+        case kVK_Delete: if !buffer.isEmpty { buffer.removeLast() }
+        case kVK_Return: buffer += "\n"
+        case kVK_Tab, kVK_Escape, kVK_UpArrow, kVK_DownArrow, kVK_LeftArrow, kVK_RightArrow, kVK_Home, kVK_End,
+             kVK_PageUp, kVK_PageDown, kVK_ForwardDelete:
+            buffer = ""
+        default:
+            if let c = NSEvent(cgEvent: event)?.characters, !c.isEmpty,
+               c.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) { buffer += c }
+        }
+        if buffer.count > 1500 { buffer.removeFirst(buffer.count - 1500) }
+    }
+
+    private func scheduleSuggestion(force: Bool) {
         debounce?.cancel()
         request?.cancel()
+        // Emoji codes are local and instant; model suggestions wait for a short pause in typing.
+        let quick = emoji && (buffer.last.map { $0.isLetter } ?? false) && buffer.split(separator: " ").last?.hasPrefix(":") == true
         debounce = Task {
-            try? await Task.sleep(for: .milliseconds(220))
+            try? await Task.sleep(for: .milliseconds(quick ? 60 : 220))
             guard !Task.isCancelled else { return }
-            suggest()
+            suggest(force: force)
         }
+    }
+
+    /// "Suggest now" shortcut: asks for a suggestion right away, even in the middle of a line.
+    func suggestNow() {
+        guard enabled, !paused, engine == .ready else { NSSound.beep(); return }
+        hide()
+        debounce?.cancel()
+        suggest(force: true)
     }
 
     // MARK: context
 
     private struct Context {
-        let element: AXUIElement
-        let value: String
+        let element: AXUIElement?
+        let value: String?        // the field's text, when the app exposes it
         let caret: Int
         let prefix: String
-        let caretRect: CGRect
+        let anchor: CGRect        // AX coordinates (top-left origin)
+        let placement: GhostText.Placement
+        let fromBuffer: Bool
         let app: String
         let window: String?
         let screen: String?
     }
 
-    private func focusedContext(includeScreen: Bool = true) -> Context? {
-        guard !IsSecureEventInputEnabled(), let front = NSWorkspace.shared.frontmostApplication,
-              !excludedApps.contains(front.bundleIdentifier ?? "") else { return nil }
+    private func focusedContext(includeScreen: Bool = true, force: Bool = false) -> Context? {
+        guard !IsSecureEventInputEnabled() else { setStatus("Paused: you're in a password field"); return nil }
+        guard let front = NSWorkspace.shared.frontmostApplication else { return nil }
+        let bundle = front.bundleIdentifier ?? "", name = front.localizedName ?? "this app"
+        guard !excludedApps.contains(bundle) else { setStatus("Off in \(name)"); return nil }
+        noteApp(bundle, name)
+
         let system = AXUIElementCreateSystemWide()
-        // A busy app must never stall typing: give up on slow Accessibility replies quickly.
-        AXUIElementSetMessagingTimeout(system, 0.25)
-        guard let el: AXUIElement = copy(system, kAXFocusedUIElementAttribute) else { return nil }
-        AXUIElementSetMessagingTimeout(el, 0.25)
-        let role: String? = copy(el, kAXRoleAttribute), sub: String? = copy(el, kAXSubroleAttribute)
-        guard sub != (kAXSecureTextFieldSubrole as String), role != "AXSecureTextField" else { return nil }
-        guard let value: String = copy(el, kAXValueAttribute), !value.isEmpty,
-              let rangeValue: AXValue = copy(el, kAXSelectedTextRangeAttribute) else { return nil }
-        var range = CFRange()
-        guard AXValueGetValue(rangeValue, .cfRange, &range), range.length == 0 else { return nil }
-        let ns = value as NSString
-        let caret = min(range.location, ns.length)
-        // Only complete at the end of a line (nothing but spaces after the cursor on this line).
-        let after = ns.substring(from: caret)
-        let restOfLine = after.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
-        guard restOfLine.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-        let prefix = ns.substring(to: caret)
-        guard let last = prefix.last, !last.isNewline, prefix.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else { return nil }
-        guard let rect = caretRect(el, caret) else { return nil }
-        let windowEl: AXUIElement? = copy(AXUIElementCreateApplication(front.processIdentifier), kAXFocusedWindowAttribute)
+        AXUIElementSetMessagingTimeout(system, 0.25)   // a busy app must never stall typing
+        let el: AXUIElement? = copy(system, kAXFocusedUIElementAttribute)
+        if let el {
+            AXUIElementSetMessagingTimeout(el, 0.25)
+            let role: String? = copy(el, kAXRoleAttribute), sub: String? = copy(el, kAXSubroleAttribute)
+            if sub == (kAXSecureTextFieldSubrole as String) || role == "AXSecureTextField" { return nil }
+        }
+
+        // 1. The app's own text and cursor (best).
+        var prefix: String?, value: String?, caret = 0, fromBuffer = false
+        if let el, let v: String = copy(el, kAXValueAttribute), !v.isEmpty,
+           let rv: AXValue = copy(el, kAXSelectedTextRangeAttribute) {
+            var range = CFRange()
+            if AXValueGetValue(rv, .cfRange, &range), range.length == 0 {
+                let ns = v as NSString
+                caret = min(max(range.location, 0), ns.length)
+                if !force, caret < ns.length,
+                   ns.substring(with: NSRange(location: caret, length: 1)).rangeOfCharacter(from: .alphanumerics) != nil {
+                    setStatus("Waiting until you're at the end of a word")
+                    return nil
+                }
+                prefix = ns.substring(to: caret)
+                value = v
+            }
+        }
+        // 2. Our typing buffer, for apps that don't share their text.
+        if prefix == nil, !buffer.isEmpty, bufferPID == front.processIdentifier {
+            prefix = buffer
+            fromBuffer = true
+        }
+        guard let p = prefix, p.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
+            setStatus("Type a few words in \(name) to get suggestions")
+            return nil
+        }
+        if !force, p.last?.isNewline == true { return nil }
+
+        // Where to show it: at the cursor, under a small field, or as a bubble at the bottom of the window.
+        let appEl = AXUIElementCreateApplication(front.processIdentifier)
+        AXUIElementSetMessagingTimeout(appEl, 0.25)
+        let windowEl: AXUIElement? = copy(appEl, kAXFocusedWindowAttribute)
+        var anchor: CGRect?, placement = GhostText.Placement.inline
+        if let el, value != nil, let r = caretRect(el, caret) {
+            anchor = r
+        } else if let el, let f = frame(el), f.height > 0, f.height < 120 {
+            anchor = CGRect(x: f.minX, y: f.maxY + 4, width: 1, height: 18); placement = .below
+        } else if let w = windowEl, let f = frame(w) {
+            anchor = CGRect(x: f.midX, y: f.maxY - 64, width: 1, height: 18); placement = .centred
+        }
+        guard let a = anchor else { setStatus("\(name) doesn't say where its text is, so there's nowhere to show suggestions"); return nil }
+
         let title: String? = windowEl.flatMap { copy($0, kAXTitleAttribute) }
-        let screen = useScreenContext && includeScreen ? windowEl.map { visibleText($0, excluding: value) } : nil
-        return Context(element: el, value: value, caret: caret, prefix: String(prefix.suffix(1500)), caretRect: rect,
-                       app: front.localizedName ?? "an app", window: title, screen: screen)
+        let screen = useScreenContext && includeScreen ? windowEl.map { visibleText($0, excluding: value ?? p) } : nil
+        return Context(element: el, value: value, caret: caret, prefix: String(p.suffix(1500)), anchor: a, placement: placement,
+                       fromBuffer: fromBuffer, app: name, window: title, screen: screen)
     }
 
     private func copy<T>(_ el: AXUIElement, _ attr: String) -> T? {
         var v: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, attr as CFString, &v) == .success else { return nil }
         return v as? T
+    }
+
+    private func frame(_ el: AXUIElement) -> CGRect? {
+        guard let pv: AXValue = copy(el, kAXPositionAttribute), let sv: AXValue = copy(el, kAXSizeAttribute) else { return nil }
+        var p = CGPoint.zero, s = CGSize.zero
+        AXValueGetValue(pv, .cgPoint, &p); AXValueGetValue(sv, .cgSize, &s)
+        return s.width > 0 ? CGRect(origin: p, size: s) : nil
     }
 
     /// Screen rectangle of the insertion point (AX coordinates: top-left origin).
@@ -317,23 +519,52 @@ final class Autocomplete: ObservableObject {
 
     // MARK: suggestions
 
-    private func suggest() {
-        guard let ctx = focusedContext() else { return }
+    private struct Suggestion {
+        enum Kind { case completion, emoji, correction }
+        let kind: Kind
+        let insert: String      // text to type
+        let display: String     // what the ghost shows
+        let replace: Int        // characters before the cursor to replace first (emoji code, misspelt word)
+        let ctx: Context
+    }
+
+    private func suggest(force: Bool) {
+        guard let ctx = focusedContext(force: force) else { return }
+        if emoji, let s = emojiSuggestion(ctx) { present(s); return }
+        if autocorrect, let s = correctionSuggestion(ctx) { present(s); return }
+
         let prompt = buildPrompt(prefix: ctx.prefix, app: ctx.app, window: ctx.window, screen: ctx.screen)
         let started = Date()
-        complete(prompt: prompt) { [weak self] text, hitLimit in
+        complete(prompt: prompt, tokens: length.tokens) { [weak self] text, hitLimit in
             guard let self else { return }
             self.lastLatency = Int(Date().timeIntervalSince(started) * 1000)
-            guard var t = text else { return }
+            guard var t = text else { self.setStatus("The model didn't answer: is it still loading?"); return }
             if hitLimit, let space = t.lastIndex(of: " ") { t = String(t[..<space]) }   // drop a cut-off last word
             if ctx.prefix.last?.isWhitespace == true { t = String(t.drop { $0 == " " }) }
             t = t.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .newlines)
-            guard t.trimmingCharacters(in: .whitespaces).count >= 2 else { return }
-            // Only show it if the user hasn't typed since we asked.
-            guard let now: String = self.copy(ctx.element, kAXValueAttribute), now == ctx.value else { return }
-            self.suggestion = (t, ctx.element, ctx.value, ctx.caret)
-            self.ghost.show(t, at: ctx.caretRect)
+            guard t.trimmingCharacters(in: .whitespaces).count >= 2 else { self.setStatus("No suggestion for that (\(self.lastLatency ?? 0) ms)"); return }
+            guard self.stillCurrent(ctx) else { return }   // the user kept typing
+            self.present(Suggestion(kind: .completion, insert: t, display: t, replace: 0, ctx: ctx))
         }
+    }
+
+    private func stillCurrent(_ ctx: Context) -> Bool {
+        if ctx.fromBuffer { return buffer.hasSuffix(ctx.prefix.suffix(40)) }
+        guard let el = ctx.element, let now: String = copy(el, kAXValueAttribute) else { return false }
+        return now == ctx.value
+    }
+
+    private func present(_ s: Suggestion) {
+        suggestion = s
+        let hint: String
+        switch s.kind {
+        case .completion: hint = acceptKey == .tab ? "⇥" : "→"
+        case .emoji: hint = acceptKey == .tab ? "⇥ emoji" : "→ emoji"
+        case .correction: hint = acceptKey == .tab ? "⇥ fix" : "→ fix"
+        }
+        ghost.show(s.display, hint: hint, at: s.ctx.anchor, placement: s.ctx.placement)
+        let how = s.ctx.fromBuffer ? " (from your typing)" : ""
+        setStatus("Suggested in \(s.ctx.app)\(how)" + (s.kind == .completion ? " · \(lastLatency ?? 0) ms" : ""))
     }
 
     func buildPrompt(prefix: String, app: String, window: String?, screen: String?) -> String {
@@ -349,14 +580,15 @@ final class Autocomplete: ObservableObject {
         return p + "---\n" + prefix
     }
 
-    private func complete(prompt: String, done: @escaping (String?, Bool) -> Void) {
+    private func complete(prompt: String, tokens: Int, done: @escaping (String?, Bool) -> Void) {
         request?.cancel()
+        if usingApple { appleComplete(prompt: prompt, tokens: tokens, done: done); return }
         guard let url = URL(string: "http://127.0.0.1:\(port)/completion") else { return }
         var r = URLRequest(url: url)
         r.httpMethod = "POST"
         r.timeoutInterval = 4
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = ["prompt": prompt, "n_predict": 18, "temperature": 0.2, "top_k": 20, "top_p": 0.9,
+        let body: [String: Any] = ["prompt": prompt, "n_predict": tokens, "temperature": 0.2, "top_k": 20, "top_p": 0.9,
                                    "stop": ["\n", "---"], "cache_prompt": true]
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
         let task = URLSession.shared.dataTask(with: r) { data, _, _ in
@@ -369,44 +601,181 @@ final class Autocomplete: ObservableObject {
         task.resume()
     }
 
+    /// Apple's on-device model is chat-tuned, so it's asked to fill a blank (▮) rather than to "continue",
+    /// which stops it replying to the text instead of completing it.
+    private func appleComplete(prompt: String, tokens: Int, done: @escaping (String?, Bool) -> Void) {
+        appleTask?.cancel()
+        #if canImport(FoundationModels)
+        guard #available(macOS 26.0, *) else { done(nil, false); return }
+        let parts = prompt.components(separatedBy: "---\n")
+        let context = parts.first ?? "", text = parts.dropFirst().joined(separator: "---\n")
+        let instructions = """
+        You complete unfinished text, like a phone keyboard's predictive text. The user's text is cut off at ▮. \
+        Output only the words that belong at ▮ to continue it: 1 to \(max(tokens / 2, 4)) words, lowercase unless a name \
+        or a new sentence, no quotes, no reply, nothing the text already says.
+        \(context)
+        """
+        appleTask = Task {
+            let session = LanguageModelSession(instructions: instructions)
+            let r = try? await session.respond(to: "Text: \(text.suffix(1200))▮",
+                                               options: GenerationOptions(temperature: 0.1, maximumResponseTokens: tokens))
+            guard !Task.isCancelled else { return }
+            var t = r?.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            t = t.trimmingCharacters(in: CharacterSet(charactersIn: "\"“”▮"))
+            // Continue with a space unless the text ends in one (or the model returned punctuation).
+            if let first = t.first, !first.isPunctuation, text.last?.isWhitespace == false { t = " " + t }
+            done(t.isEmpty ? nil : t, false)
+        }
+        #else
+        done(nil, false)
+        #endif
+    }
+
+    // MARK: emoji & autocorrect
+
+    /// `:smile`, `:thumbs`, `:fire` → the best-matching emoji (Cotypist-style emoji completion).
+    private func emojiSuggestion(_ ctx: Context) -> Suggestion? {
+        let p = ctx.prefix
+        guard let colon = p.lastIndex(of: ":") else { return nil }
+        let code = p[p.index(after: colon)...]
+        guard code.count >= 2, code.count <= 24, code.allSatisfy({ $0.isLetter || $0 == "_" }) else { return nil }
+        if colon > p.startIndex, !p[p.index(before: colon)].isWhitespace { return nil }   // "10:30", "http:"
+        guard let (e, name) = Self.emoji(for: code.lowercased()) else { return nil }
+        return Suggestion(kind: .emoji, insert: e, display: "\(e)  \(name)", replace: code.count + 1, ctx: ctx)
+    }
+
+    private static let emojiAliases: [String: String] = [
+        "smile": "😄", "grin": "😁", "laugh": "😂", "lol": "😂", "joy": "😂", "rofl": "🤣", "wink": "😉", "blush": "😊",
+        "heart": "❤️", "love": "😍", "kiss": "😘", "cool": "😎", "think": "🤔", "thinking": "🤔", "shrug": "🤷",
+        "cry": "😢", "sob": "😭", "angry": "😠", "sad": "😞", "sweat": "😅", "scream": "😱", "sleep": "😴",
+        "thumbsup": "👍", "thumbs": "👍", "yes": "👍", "thumbsdown": "👎", "clap": "👏", "wave": "👋", "pray": "🙏",
+        "thanks": "🙏", "ok": "👌", "muscle": "💪", "eyes": "👀", "fire": "🔥", "tada": "🎉", "party": "🥳",
+        "rocket": "🚀", "star": "⭐", "sparkles": "✨", "check": "✅", "done": "✅", "x": "❌", "warning": "⚠️",
+        "coffee": "☕", "beer": "🍺", "pizza": "🍕", "cake": "🎂", "gift": "🎁", "sun": "☀️", "rain": "🌧️",
+        "hundred": "💯", "100": "💯", "bulb": "💡", "idea": "💡", "calendar": "📅", "phone": "📱", "laptop": "💻",
+    ]
+
+    private static let emojiIndex: [(emoji: String, name: String)] = {
+        var out: [(String, String)] = []
+        let ranges: [ClosedRange<UInt32>] = [0x1F300...0x1F5FF, 0x1F600...0x1F64F, 0x1F680...0x1F6FF, 0x1F900...0x1F9FF,
+                                             0x1FA70...0x1FAFF, 0x2600...0x26FF, 0x2700...0x27BF]
+        for r in ranges {
+            for v in r {
+                guard let s = Unicode.Scalar(v), s.properties.isEmojiPresentation, let n = s.properties.name else { continue }
+                out.append((String(s), n.lowercased()))
+            }
+        }
+        return out
+    }()
+
+    private static func emoji(for code: String) -> (String, String)? {
+        if let e = emojiAliases[code] { return (e, ":" + code) }
+        let q = code.replacingOccurrences(of: "_", with: " ")
+        let ranked = emojiIndex.compactMap { e -> (String, String, Int)? in
+            let words = e.name.split(separator: " ")
+            if e.name == q { return (e.emoji, e.name, 0) }
+            if words.contains(where: { $0 == q }) { return (e.emoji, e.name, 1) }
+            if words.contains(where: { $0.hasPrefix(q) }) { return (e.emoji, e.name, 2) }
+            return nil
+        }
+        guard let best = ranked.min(by: { ($0.2, $0.1.count) < ($1.2, $1.1.count) }) else { return nil }
+        return (best.0, best.1)
+    }
+
+    /// After a space, offers a fix for a misspelt word (Cotypist-style autocorrect).
+    private func correctionSuggestion(_ ctx: Context) -> Suggestion? {
+        let p = ctx.prefix
+        guard p.last == " " else { return nil }
+        let trimmed = p.dropLast()
+        guard let r = trimmed.range(of: "[A-Za-z']+$", options: .regularExpression) else { return nil }
+        let word = String(trimmed[r])
+        guard word.count >= 3, word.first?.isLowercase == true,
+              !vocabulary.keys.contains(where: { $0.caseInsensitiveCompare(word) == .orderedSame }) else { return nil }
+        let checker = NSSpellChecker.shared
+        let lang = style.localizedCaseInsensitiveContains("british") ? "en_GB" : "en"
+        let miss = checker.checkSpelling(of: word, startingAt: 0, language: lang, wrap: false, inSpellDocumentWithTag: 0, wordCount: nil)
+        guard miss.location != NSNotFound else { return nil }
+        let range = NSRange(location: 0, length: (word as NSString).length)
+        var candidates = checker.guesses(forWordRange: range, in: word, language: lang, inSpellDocumentWithTag: 0) ?? []
+        if let c = checker.correction(forWordRange: range, in: word, language: lang, inSpellDocumentWithTag: 0) { candidates.insert(c, at: 0) }
+        // Prefer guesses that keep the first letter, then the fewest edits ("adress" → "address", not "dress").
+        let ranked = candidates.enumerated().sorted {
+            let a = ($0.element.first?.lowercased() == word.first?.lowercased() ? 0 : 1, Self.editDistance($0.element.lowercased(), word.lowercased()), $0.offset)
+            let b = ($1.element.first?.lowercased() == word.first?.lowercased() ? 0 : 1, Self.editDistance($1.element.lowercased(), word.lowercased()), $1.offset)
+            return a < b
+        }
+        guard let fix = ranked.first?.element, fix.caseInsensitiveCompare(word) != .orderedSame,
+              Self.editDistance(fix.lowercased(), word.lowercased()) <= 2 else { return nil }
+        return Suggestion(kind: .correction, insert: fix + " ", display: "\(word) → \(fix)", replace: word.count + 1, ctx: ctx)
+    }
+
+    static func editDistance(_ a: String, _ b: String) -> Int {
+        let a = Array(a), b = Array(b)
+        guard !a.isEmpty else { return b.count }
+        guard !b.isEmpty else { return a.count }
+        var prev = Array(0...b.count)
+        for i in 1...a.count {
+            var cur = [i] + Array(repeating: 0, count: b.count)
+            for j in 1...b.count {
+                cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1))
+            }
+            prev = cur
+        }
+        return prev[b.count]
+    }
+
     // MARK: accepting
 
-    private func acceptAll() {
-        guard let s = suggestion else { return }
-        insert(s.text, into: s.element)
-        remember(lineEnding: s.value, with: s.text)
-        count()
+    private func accept(_ s: Suggestion, wordOnly: Bool) {
+        var text = s.insert, rest = ""
+        if wordOnly {
+            let chars = Array(s.insert)
+            var i = 0
+            while i < chars.count, chars[i] == " " { i += 1 }
+            while i < chars.count, chars[i] != " " { i += 1 }
+            text = String(chars[..<i]); rest = String(chars[i...])
+        }
+        insert(text, replacing: s.replace, ctx: s.ctx)
+        if s.ctx.fromBuffer || s.ctx.element == nil {
+            if s.replace > 0 { buffer.removeLast(min(s.replace, buffer.count)) }
+            buffer += text
+        }
         hide()
-    }
-
-    /// Accepts up to and including the next word, then offers the rest.
-    private func acceptWord() {
-        guard let s = suggestion else { return }
-        let chars = Array(s.text)
-        var i = 0
-        while i < chars.count, chars[i] == " " { i += 1 }
-        while i < chars.count, chars[i] != " " { i += 1 }
-        let word = String(chars[..<i]), rest = String(chars[i...])
-        insert(word, into: s.element)
-        hide()
-        if !rest.trimmingCharacters(in: .whitespaces).isEmpty,
-           let v: String = copy(s.element, kAXValueAttribute), let rect = caretRect(s.element, s.caret + (word as NSString).length) {
-            suggestion = (rest, s.element, v, s.caret + (word as NSString).length)
-            ghost.show(rest, at: rect)
-        } else {
-            count()
+        if s.kind == .completion { countWords(text) }
+        if !rest.trimmingCharacters(in: .whitespaces).isEmpty {
+            // Offer the rest of the suggestion straight away.
+            let caret = s.ctx.caret + (text as NSString).length
+            var anchor = s.ctx.anchor
+            if s.ctx.placement == .inline, let el = s.ctx.element, let r = caretRect(el, caret) { anchor = r }
+            let value: String? = s.ctx.element.flatMap { copy($0, kAXValueAttribute) }
+            let ctx = Context(element: s.ctx.element, value: value, caret: caret, prefix: s.ctx.prefix + text, anchor: anchor,
+                              placement: s.ctx.placement, fromBuffer: s.ctx.fromBuffer, app: s.ctx.app, window: s.ctx.window, screen: nil)
+            present(Suggestion(kind: .completion, insert: rest, display: rest, replace: 0, ctx: ctx))
+        } else if s.kind == .completion {
+            remember(lineEnding: s.ctx.prefix, with: text)
+            accepted += 1; defaults.set(accepted, forKey: "acAccepted")
+            setStatus("Accepted in \(s.ctx.app)")
         }
     }
 
-    private func count() { accepted += 1; defaults.set(accepted, forKey: "acAccepted") }
-
-    /// Inserts at the cursor: Accessibility first (instant, native apps), typing as a fallback.
-    private func insert(_ text: String, into el: AXUIElement) {
-        let before: String? = copy(el, kAXValueAttribute)
-        if AXUIElementSetAttributeValue(el, kAXSelectedTextAttribute as CFString, text as CFString) == .success,
-           let after: String = copy(el, kAXValueAttribute), after != before {
-            return
+    /// Inserts at the cursor, first replacing `replacing` characters before it. Accessibility first
+    /// (instant, native apps); otherwise backspaces + typing, which works everywhere.
+    private func insert(_ text: String, replacing n: Int, ctx: Context) {
+        if let el = ctx.element, !ctx.fromBuffer, let before: String = copy(el, kAXValueAttribute) {
+            var selected = n == 0
+            if n > 0 {
+                var r = CFRange(location: max(ctx.caret - n, 0), length: min(n, ctx.caret))
+                if let v = AXValueCreate(.cfRange, &r) {
+                    selected = AXUIElementSetAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, v) == .success
+                }
+            }
+            if selected, AXUIElementSetAttributeValue(el, kAXSelectedTextAttribute as CFString, text as CFString) == .success,
+               let after: String = copy(el, kAXValueAttribute), after != before {
+                return
+            }
+            if selected && n > 0 { Self.type(text); return }   // typing replaces the selected characters
         }
+        for _ in 0..<n { Paster.key(kVK_Delete) }
         Self.type(text)
     }
 
@@ -430,6 +799,32 @@ final class Autocomplete: ObservableObject {
     func hide() {
         suggestion = nil
         ghost.hide()
+    }
+
+    // MARK: status, stats, apps
+
+    private func setStatus(_ s: String) { if status != s { status = s } }
+
+    private func countWords(_ text: String) {
+        let n = text.split(whereSeparator: { $0.isWhitespace }).count
+        guard n > 0 else { return }
+        let today = Self.dayKey()
+        if defaults.string(forKey: "acWordsDay") != today { wordsToday = 0; defaults.set(today, forKey: "acWordsDay") }
+        wordsToday += n; wordsTotal += n
+        defaults.set(wordsToday, forKey: "acWordsToday"); defaults.set(wordsTotal, forKey: "acWordsTotal")
+    }
+
+    private static func dayKey() -> String { Date().formatted(.iso8601.year().month().day()) }
+
+    /// Remembers apps it has been used in, so Settings can offer a per-app on/off switch.
+    private func noteApp(_ bundle: String, _ name: String) {
+        guard !bundle.isEmpty, seenApps[bundle] == nil else { return }
+        seenApps[bundle] = name
+        defaults.set(seenApps, forKey: "acSeenApps")
+    }
+
+    func setApp(_ bundle: String, enabled on: Bool) {
+        if on { excludedApps.removeAll { $0 == bundle } } else if !excludedApps.contains(bundle) { excludedApps.append(bundle) }
     }
 
     // MARK: personalisation (local only)
@@ -456,8 +851,9 @@ final class Autocomplete: ObservableObject {
 
     /// When you press Return, the line you just finished is kept as an example of your writing.
     private func rememberCurrentLine() {
-        guard learn, let ctx = focusedContext(includeScreen: false) else { return }
-        if let line = ctx.prefix.split(separator: "\n").last { add(String(line)) }
+        guard learn, let ctx = focusedContext(includeScreen: false, force: true) else { return }
+        let lines = ctx.prefix.split(separator: "\n", omittingEmptySubsequences: false)
+        if let line = lines.dropLast().last ?? lines.last { add(String(line)) }
     }
 
     private func remember(lineEnding value: String, with completion: String) {
@@ -587,32 +983,51 @@ final class Autocomplete: ObservableObject {
     }
 }
 
+
 // MARK: - Ghost text overlay
 
-/// A click-through, non-activating panel that draws the suggestion in grey right after the cursor.
+/// A click-through, non-activating panel that shows the suggestion: inline in grey right after the
+/// cursor when the app reports where it is, otherwise as a small glass bubble under the field or at
+/// the bottom of the window.
 @MainActor
 final class GhostText {
+    enum Placement { case inline, below, centred }
+
     private var panel: NSPanel?
     private let label = NSTextField(labelWithString: "")
+    private let bubble = NSVisualEffectView()
 
-    func show(_ text: String, at caret: CGRect) {
+    func show(_ text: String, hint: String, at anchor: CGRect, placement: Placement) {
         let p = panel ?? make()
         panel = p
-        let size = min(max(caret.height * 0.78, 11), 30)
+        let inline = placement == .inline
+        let size = inline ? min(max(anchor.height * 0.78, 11), 30) : 14
         let attr = NSMutableAttributedString(string: text, attributes: [
-            .font: NSFont.systemFont(ofSize: size), .foregroundColor: NSColor.secondaryLabelColor.withAlphaComponent(0.75),
+            .font: NSFont.systemFont(ofSize: size),
+            .foregroundColor: inline ? NSColor.secondaryLabelColor.withAlphaComponent(0.75) : NSColor.labelColor,
         ])
-        attr.append(NSAttributedString(string: "  ⇥", attributes: [
-            .font: NSFont.systemFont(ofSize: size * 0.7, weight: .medium), .foregroundColor: NSColor.tertiaryLabelColor,
+        attr.append(NSAttributedString(string: "  " + hint, attributes: [
+            .font: NSFont.systemFont(ofSize: size * 0.72, weight: .medium), .foregroundColor: NSColor.tertiaryLabelColor,
         ]))
         label.attributedStringValue = attr
         label.sizeToFit()
+        bubble.isHidden = inline
+        let padX: CGFloat = inline ? 2 : 10, padY: CGFloat = inline ? 0 : 6
+        let size2 = NSSize(width: min(label.frame.width, 720) + padX * 2, height: label.frame.height + padY * 2)
         // AX uses a top-left origin on the primary display; AppKit uses bottom-left.
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
-        let frame = NSRect(x: caret.maxX + 1, y: primaryHeight - caret.maxY + (caret.height - label.frame.height) / 2,
-                           width: label.frame.width + 4, height: label.frame.height)
-        p.setFrame(frame, display: true)
-        label.frame = NSRect(origin: .zero, size: frame.size)
+        var origin: NSPoint
+        switch placement {
+        case .inline:
+            origin = NSPoint(x: anchor.maxX + 1, y: primaryHeight - anchor.maxY + (anchor.height - size2.height) / 2)
+        case .below:
+            origin = NSPoint(x: anchor.minX, y: primaryHeight - anchor.minY - size2.height)
+        case .centred:
+            origin = NSPoint(x: anchor.midX - size2.width / 2, y: primaryHeight - anchor.minY - size2.height)
+        }
+        p.setFrame(NSRect(origin: origin, size: size2), display: true)
+        bubble.frame = NSRect(origin: .zero, size: size2)
+        label.frame = NSRect(x: padX, y: padY, width: size2.width - padX * 2, height: label.frame.height)
         p.orderFrontRegardless()
     }
 
@@ -622,13 +1037,20 @@ final class GhostText {
         let p = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.isOpaque = false
         p.backgroundColor = .clear
-        p.hasShadow = false
+        p.hasShadow = true
         p.ignoresMouseEvents = true
         p.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.popUpMenuWindow)))
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        bubble.material = .popover
+        bubble.blendingMode = .behindWindow
+        bubble.state = .active
+        bubble.wantsLayer = true
+        bubble.layer?.cornerRadius = 9
+        bubble.layer?.masksToBounds = true
         label.drawsBackground = false
         label.isBordered = false
-        label.lineBreakMode = .byClipping
+        label.lineBreakMode = .byTruncatingTail
+        p.contentView?.addSubview(bubble)
         p.contentView?.addSubview(label)
         return p
     }

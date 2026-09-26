@@ -13,6 +13,7 @@ final class AppShortcuts: ObservableObject {
     let snippets: ShortcutSetting
     let quickNotes: ShortcutSetting
     var autocompletePause: ShortcutSetting?
+    var autocompleteNow: ShortcutSetting?
     /// AeroSpace layout/width shortcuts, keyed by AeroSpace.shortcutActions id.
     var layouts: [String: ShortcutSetting] = [:]
 
@@ -253,15 +254,48 @@ struct AutocompletePage: View {
             Section {
                 Toggle(isOn: $ac.enabled) {
                     Text("Autocomplete")
-                    Text("Press Tab to accept a suggestion, ⌥→ for just the next word, Esc to dismiss.")
+                    Text("\(ac.acceptKey.label) accepts a suggestion, ⌥→ just the next word, Esc dismisses it.")
                 }
                 if ac.enabled {
                     AccessibilityRow(feature: "read what you type and insert suggestions")
                     LabeledContent("Model") { engineStatus }
+                    LabeledContent("Now") {
+                        Text(ac.status).foregroundStyle(.secondary).multilineTextAlignment(.trailing).lineLimit(2)
+                    }
+                }
+            } footer: {
+                Footer("Works in any app. Where an app shows its cursor (Mail, Messages, Notes, Slack, Obsidian…) suggestions appear right after it; elsewhere, such as VS Code and some browsers, they appear in a small bubble. Password fields and apps you switch off are always skipped.")
+            }
+
+            Section {
+                Picker("On battery", selection: $ac.batteryMode) {
+                    ForEach(Autocomplete.BatteryMode.allCases) { m in
+                        Text(m.label).tag(m).disabled(m == .apple && !Autocomplete.appleModelAvailable)
+                    }
+                }
+                Picker("Suggestion length", selection: $ac.length) {
+                    ForEach(Autocomplete.Length.allCases) { Text($0.label).tag($0) }
+                }
+                Picker("Accept with", selection: $ac.acceptKey) {
+                    ForEach(Autocomplete.AcceptKey.allCases) { Text($0.label).tag($0) }
+                }
+                Toggle(isOn: $ac.emoji) {
+                    Text("Emoji completion")
+                    Text("Type a colon and a word, like :smile or :thumbsup, to get the emoji.")
+                }
+                Toggle(isOn: $ac.autocorrect) {
+                    Text("Autocorrect")
+                    Text("After a misspelt word, offers the correction; accept it like a suggestion.")
                 }
                 if let s = shortcuts.autocompletePause { ShortcutRow(title: "Pause or resume", setting: s) }
+                if let s = shortcuts.autocompleteNow { ShortcutRow(title: "Suggest now", setting: s) }
+                LabeledContent("Words completed") {
+                    Text("\(ac.wordsToday) today · \(ac.wordsTotal) in total").monospacedDigit().foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Suggestions")
             } footer: {
-                Footer("Suggestions appear in native apps such as Mail, Messages, Notes, Slack and Obsidian. Some browsers and Electron apps don't report the cursor position, so suggestions may not show there. Password fields and the apps below are always skipped.")
+                Footer("On battery, Apple's built-in model saves power and memory: FanCurve stops the larger model until you plug in again. Suggest now asks for a suggestion straight away, even in the middle of a line.")
             }
 
             Section {
@@ -343,17 +377,22 @@ struct AutocompletePage: View {
             }
 
             Section {
-                ForEach(ac.excludedApps, id: \.self) { id in
-                    HStack {
-                        Text(appName(id))
-                        Spacer()
-                        Button { ac.excludedApps.removeAll { $0 == id } } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.secondary) }
-                            .buttonStyle(.borderless)
+                let apps = Array(Set(ac.excludedApps).union(ac.seenApps.keys)).sorted { appName($0).localizedCaseInsensitiveCompare(appName($1)) == .orderedAscending }
+                ForEach(apps, id: \.self) { id in
+                    Toggle(isOn: Binding(get: { !ac.excludedApps.contains(id) }, set: { ac.setApp(id, enabled: $0) })) {
+                        HStack(spacing: 8) {
+                            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+                                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 18, height: 18)
+                            }
+                            Text(appName(id))
+                        }
                     }
                 }
-                Button { addApp() } label: { Label("Add App…", systemImage: "plus") }.buttonStyle(.borderless)
+                Button { addApp() } label: { Label("Switch Off in Another App…", systemImage: "plus") }.buttonStyle(.borderless)
             } header: {
-                Text("Never Suggest In")
+                Text("Apps")
+            } footer: {
+                Footer("Apps appear here once you've typed in them. Switch one off to never suggest there.")
             }
         }
         .formStyle(.grouped)
@@ -365,7 +404,8 @@ struct AutocompletePage: View {
         case .notInstalled: StatusRow(text: "llama.cpp not installed", color: .orange).fixedSize()
         case .noModel: StatusRow(text: "No model selected", color: .orange).fixedSize()
         case .starting: StatusRow(text: "Loading \(ac.modelFile)…", color: .orange).fixedSize()
-        case .ready: StatusRow(text: "Ready · \(ac.modelFile)", color: .green).fixedSize()
+        case .ready:
+            StatusRow(text: ac.usingApple ? "Ready · Apple on-device model (on battery)" : "Ready · \(ac.modelFile)", color: .green).fixedSize()
         case .failed(let m): StatusRow(text: m, color: .red).fixedSize()
         }
     }
