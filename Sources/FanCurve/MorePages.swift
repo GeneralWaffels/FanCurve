@@ -235,7 +235,7 @@ struct LauncherPage: View {
 
     var body: some View {
         Form {
-            PageHeader(page: .launcher, description: "One shortcut to launch apps, run FanCurve commands, join meetings, paste snippets and do quick maths.")
+            PageHeader(page: .launcher, description: "One shortcut to launch your favourite apps, run FanCurve commands, join meetings, paste snippets and do quick maths.")
 
             Section {
                 ShortcutRow(title: "Open command palette", setting: shortcuts.palette)
@@ -246,7 +246,10 @@ struct LauncherPage: View {
                 Footer("⌥Space is the default, like Raycast. If you also use Raycast or Alfred, give one of them a different shortcut.")
             }
 
+            FavouritesSection()
+
             Section("What You Can Search") {
+                feature("star.fill", .yellow, "Favourites", "Pinned apps first; ⌘1–9 launches them, ⌘F pins the selected app.")
                 feature("square.grid.2x2.fill", .blue, "Applications", "Open any app by typing part of its name.")
                 feature("fan.fill", .blue, "Fans", "Turn the curve on or off and switch profiles.")
                 feature("video.fill", .red, "Meetings", "Join the next call or open your schedule.")

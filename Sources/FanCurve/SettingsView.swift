@@ -540,9 +540,7 @@ struct MicPage: View {
 
             Section {
                 LabeledContent("Toggle shortcut") { ShortcutRecorder(shortcut: $mic.shortcut) }
-                if mic.shortcutConflict, let s = mic.shortcut {
-                    StatusRow(text: "\(s.display) is already used by macOS or another app. Pick a different combination.", color: .red)
-                }
+                ShortcutWarnings(shortcut: mic.shortcut, conflict: mic.shortcutConflict)
             } header: {
                 Text("Keyboard Shortcut")
             } footer: {

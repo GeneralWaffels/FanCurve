@@ -34,14 +34,17 @@ struct FanCurveApp: App {
     @StateObject private var snippets: SnippetStore
     @StateObject private var shortcuts: AppShortcuts
     @StateObject private var aero: AeroSpace
+    @StateObject private var favourites: Favourites
 
     init() {
         let model = Model(), keyboard = KeyboardBlocker(), displays = Displays(), mic = MicMuter()
-        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace()
+        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites()
+        favourites.aero = aero
+        LauncherPanel.shared.favourites = favourites
         calendar.onJoin = { [weak mic] in mic?.setMuted(true) }
 
         let palette = CommandSource(.init(model: model, mic: mic, keyboard: keyboard, displays: displays, calendar: calendar,
-                                          snippets: snippets, updater: updater, aero: aero,
+                                          snippets: snippets, updater: updater, aero: aero, favourites: favourites,
                                           openSettings: { NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil) }))
         let schedule = ScheduleSource(calendar: calendar)
         let snippetSearch = SnippetSource(store: snippets)
@@ -71,6 +74,7 @@ struct FanCurveApp: App {
         _snippets = StateObject(wrappedValue: snippets)
         _shortcuts = StateObject(wrappedValue: shortcuts)
         _aero = StateObject(wrappedValue: aero)
+        _favourites = StateObject(wrappedValue: favourites)
     }
 
     var body: some Scene {
@@ -93,6 +97,7 @@ struct FanCurveApp: App {
                 .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
                 .environmentObject(brightnessKeys).environmentObject(loginItem).environmentObject(updater)
                 .environmentObject(calendar).environmentObject(snippets).environmentObject(shortcuts).environmentObject(aero)
+                .environmentObject(favourites)
         }
         .defaultSize(width: 760, height: 680)
         .windowToolbarStyle(.unified)

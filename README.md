@@ -9,6 +9,8 @@ A Macs Fan Control–style fan curve app for Apple Silicon (built and verified o
 - **Brightness keys for external monitors**: the MacBook's brightness keys can control the display under the pointer, or all displays together (Displays → Brightness Keys). Steps match macOS (16 per range, ⌥⇧ for 64), with a glass brightness overlay on the monitor being changed. Needs Accessibility permission.
 - **Open at login** and **in-app updates** (Settings → General): FanCurve checks your `./serve.sh on` server every few hours and installs new versions with the standard administrator password prompt, fan service included.
 - **Command palette** (⌥Space): a Raycast-style launcher. Search apps, FanCurve commands (fan curve, profiles, mute, brightness, cleaning mode), meetings and snippets. It also has a calculator (`23*1.21` → Return copies) and system commands (lock, sleep, screen saver, dark mode).
+- **Favourites** in the command palette: pinned apps appear first. Press ⌘1–9 in the palette to launch one, ⌘F to pin or unpin the selected app, or use ⌃⌥1–9 from anywhere (optional). Manage them in Settings → Command Palette.
+- **Shortcut defaults avoid AeroSpace**: AeroSpace's bindings are all ⌥/⌥⇧ + key. FanCurve uses ⌥Space and ⌃⌥ combinations, and warns in Settings if you pick anything AeroSpace also binds.
 - **AeroSpace integration** (in the command palette; type "aerospace" or a workspace name):
   - **Live commands** via the `aerospace` CLI: toggle tiling on or off, float or tile the focused window, tiles and accordion layouts, flip orientation, fullscreen, balance, flatten, move a workspace to the next monitor, previous workspace, and reload the config.
   - **Workspaces:** go to any workspace (with the apps in each), or move the focused window there.

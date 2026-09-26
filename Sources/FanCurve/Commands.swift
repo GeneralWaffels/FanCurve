@@ -16,6 +16,7 @@ final class CommandSource: PanelSource {
         let snippets: SnippetStore
         let updater: Updater
         let aero: AeroSpace
+        let favourites: Favourites
         let openSettings: () -> Void
     }
 
@@ -46,19 +47,27 @@ final class CommandSource: PanelSource {
         }
 
         var commands = fanCommands() + meetingCommands() + utilityCommands() + aeroCommands() + systemCommands()
-        let appItems = apps.map { app in
+        let favs = d.favourites
+        let favItems = favs.apps.enumerated().map { i, app in
+            PanelItem(id: "fav:" + app.path, section: "Favourites", title: app.name, subtitle: nil,
+                      accessory: i < 9 ? "⌘\(i + 1)" : nil, image: favs.icon(app),
+                      appURL: URL(fileURLWithPath: app.path), boost: 15) {
+                NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app.path), configuration: .init()); return true
+            }
+        }
+        let appItems = apps.filter { !favs.contains($0.url) }.map { app in
             PanelItem(id: "app:" + app.url.path, section: "Applications", title: app.name, subtitle: nil, accessory: "Application",
-                      image: NSWorkspace.shared.icon(forFile: app.url.path)) {
+                      image: NSWorkspace.shared.icon(forFile: app.url.resolvingSymlinksInPath().path), appURL: app.url) {
                 NSWorkspace.shared.openApplication(at: app.url, configuration: .init()); return true
             }
         }
 
         if query.trimmingCharacters(in: .whitespaces).isEmpty {
-            // Empty query: suggestions first, like Raycast's root search.
+            // Empty query: favourites, then suggestions, like Raycast's root search.
             commands = Array(meetingCommands().prefix(3)) + fanCommands().prefix(2) + utilityCommands().prefix(4) + aeroCommands().prefix(1)
-            return out + commands.map { var i = $0; i.section = "Suggestions"; return i }
+            return out + favItems + commands.map { var i = $0; i.section = "Suggestions"; return i }
         }
-        commands += appItems
+        commands = favItems + commands + appItems
         return out + commands.filtered(query)
     }
 

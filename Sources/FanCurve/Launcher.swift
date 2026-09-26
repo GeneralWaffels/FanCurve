@@ -43,7 +43,20 @@ struct ShortcutRow: View {
 
     var body: some View {
         LabeledContent(title) { ShortcutRecorder(shortcut: $setting.shortcut) }
-        if setting.conflict, let s = setting.shortcut {
+        ShortcutWarnings(shortcut: setting.shortcut, conflict: setting.conflict)
+    }
+}
+
+/// Warns when a shortcut is refused by macOS, or also bound in AeroSpace.
+struct ShortcutWarnings: View {
+    let shortcut: Shortcut?
+    let conflict: Bool
+    @EnvironmentObject var aero: AeroSpace
+
+    var body: some View {
+        if let s = shortcut, let action = aero.binding(for: s) {
+            StatusRow(text: "\(s.display) is also an AeroSpace shortcut (\(action)). Pick a different combination.", color: .orange)
+        } else if conflict, let s = shortcut {
             StatusRow(text: "\(s.display) is already used by macOS or another app. Pick a different combination.", color: .red)
         }
     }
@@ -60,6 +73,10 @@ struct PanelItem: Identifiable {
     var accessory: String? = nil
     var symbol: String = "circle"
     var image: NSImage? = nil
+    /// Set for app rows, so ⌘F can favourite them.
+    var appURL: URL? = nil
+    /// Added to the search score (favourites rank above other matches).
+    var boost = 0
     var tint: Color = .accentColor
     var keywords: [String] = []
     /// Run when the row is chosen. Return false to keep the panel open.
@@ -109,7 +126,9 @@ final class LauncherPanel: NSObject, NSWindowDelegate {
     }
 
     let model = PanelModel()
+    weak var favourites: Favourites?
     private var panel: Panel?
+    private var keyMonitor: Any?
     /// The app that was in front before the panel opened (so snippets paste into it).
     private(set) var previousApp: NSRunningApplication?
 
@@ -133,9 +152,40 @@ final class LauncherPanel: NSObject, NSWindowDelegate {
         }
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        installKeyMonitor()
     }
 
-    func close() { panel?.orderOut(nil) }
+    func close() {
+        panel?.orderOut(nil)
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+    }
+
+    /// ⌘1–9 launches favourites; ⌘F adds/removes the selected app as a favourite.
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.window === self.panel,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  let chars = event.charactersIgnoringModifiers?.lowercased() else { return event }
+            return MainActor.assumeIsolated {
+                if let n = Int(chars), (1...9).contains(n), let favs = self.favourites {
+                    self.close()
+                    favs.launch(n - 1)
+                    return nil
+                }
+                if chars == "f", self.model.items.indices.contains(self.model.selection),
+                   let url = self.model.items[self.model.selection].appURL, let favs = self.favourites {
+                    favs.toggle(url)
+                    self.model.reload()
+                    return nil
+                }
+                return event
+            }
+        }
+    }
+
+    var selectedIsApp: Bool { model.items.indices.contains(model.selection) && model.items[model.selection].appURL != nil }
 
     /// Runs the selected row; closes unless the row asks to stay open.
     func runSelected() {
@@ -218,6 +268,9 @@ struct LauncherView: View {
                 Image(systemName: "fan.fill").foregroundStyle(.blue)
                 Text("FanCurve").foregroundStyle(.secondary)
                 Spacer()
+                if model.items.indices.contains(model.selection), let url = model.items[model.selection].appURL {
+                    KeyHint(keys: "⌘F", label: panel.favourites?.contains(url) == true ? "Unfavourite" : "Favourite")
+                }
                 KeyHint(keys: "↩", label: "Open")
                 KeyHint(keys: "↑↓", label: "Navigate")
                 KeyHint(keys: "esc", label: "Close")
@@ -353,8 +406,8 @@ extension PanelItem {
 extension Array where Element == PanelItem {
     func filtered(_ query: String) -> [PanelItem] {
         guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return self }
-        return compactMap { item in item.score(query).map { (item, $0) } }
-            .sorted { $0.1 > $1.1 }
+        return enumerated().compactMap { i, item in item.score(query).map { (item, $0 + item.boost, i) } }
+            .sorted { ($0.1, -$0.2) > ($1.1, -$1.2) }   // best score first, stable otherwise
             .map { var i = $0.0; i.section = nil; return i }
     }
 }

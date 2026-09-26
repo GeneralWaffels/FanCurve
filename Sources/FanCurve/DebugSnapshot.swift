@@ -14,6 +14,10 @@ enum DebugSnapshot {
 
         Task {
             try? await Task.sleep(for: .seconds(1))
+            // Debug builds use their own defaults domain, so sample favourites don't touch the real app.
+            if let favs = LauncherPanel.shared.favourites, favs.apps.isEmpty {
+                ["/Applications/Safari.app", "/System/Applications/Notes.app", "/Applications/Obsidian.app"].forEach { favs.add(URL(fileURLWithPath: $0)) }
+            }
             NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil)
             try? await Task.sleep(for: .seconds(1.5))
             guard let window = NSApp.windows.first(where: { $0.title.contains("Settings") || $0.identifier?.rawValue.contains("settings") == true }) else { exit(1) }
