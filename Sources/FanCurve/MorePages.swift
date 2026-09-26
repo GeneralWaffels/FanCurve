@@ -306,6 +306,23 @@ struct AutocompletePage: View {
                     Text("Use what's on screen")
                     Text("Includes visible text from the window you're typing in, so replies fit the conversation.")
                 }
+                Toggle(isOn: $ac.learnFromScreen) {
+                    Text("Learn from what's on screen")
+                    Text("Every few minutes, notes names and terms that keep appearing in the window you're using (never whole sentences).")
+                }
+                if ac.learnFromScreen {
+                    LabeledContent("Terms learned") {
+                        HStack {
+                            Text("\(ac.vocabulary.count)").monospacedDigit().foregroundStyle(.secondary)
+                            Button("Learn Now") { ac.learnFromCurrentScreen() }
+                            Button("Forget All") { ac.forgetVocabulary() }.disabled(ac.vocabulary.isEmpty)
+                        }
+                    }
+                    if !ac.vocabulary.isEmpty {
+                        Text(ac.topTerms.prefix(24).joined(separator: " · "))
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                    }
+                }
                 Toggle(isOn: $ac.learn) {
                     Text("Learn from how I write")
                     Text("Keeps lines you finish and suggestions you accept, and uses similar ones as examples.")

@@ -19,6 +19,8 @@ final class Autocomplete: ObservableObject {
     @Published var style: String { didSet { save() } }
     @Published var useScreenContext: Bool { didSet { save() } }
     @Published var learn: Bool { didSet { save() } }
+    /// Periodically notes names and terms that keep appearing on screen (vocabulary only, never sentences).
+    @Published var learnFromScreen: Bool { didSet { save(); updateScreenLearning() } }
     @Published var excludedApps: [String] { didSet { save() } }
     @Published var modelFile: String { didSet { save(); if enabled { restartServer() } } }
 
@@ -26,6 +28,9 @@ final class Autocomplete: ObservableObject {
     @Published private(set) var engine: EngineState = .off
     @Published private(set) var accepted = 0
     @Published private(set) var historyCount = 0
+    @Published private(set) var vocabulary: [String: Term] = [:]
+    struct Term: Codable { var count: Int; var lastSeen: Date }
+    private var screenTimer: Timer?
     @Published private(set) var lastLatency: Int?
 
     let folder: URL
@@ -56,11 +61,13 @@ final class Autocomplete: ObservableObject {
             ?? "Write in a clear, friendly and professional voice."
         useScreenContext = defaults.object(forKey: "acScreen") as? Bool ?? true
         learn = defaults.object(forKey: "acLearn") as? Bool ?? true
+        learnFromScreen = defaults.bool(forKey: "acLearnScreen")
         excludedApps = defaults.stringArray(forKey: "acExcluded") ?? Self.defaultExcluded
         modelFile = defaults.string(forKey: "acModel") ?? ""
         accepted = defaults.integer(forKey: "acAccepted")
         try? FileManager.default.createDirectory(at: folder.appendingPathComponent("Models"), withIntermediateDirectories: true)
         loadHistory()
+        loadVocabulary()
         if modelFile.isEmpty { modelFile = availableModels.first ?? "" }
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.server?.terminate() }
@@ -73,6 +80,7 @@ final class Autocomplete: ObservableObject {
         defaults.set(style, forKey: "acStyle")
         defaults.set(useScreenContext, forKey: "acScreen")
         defaults.set(learn, forKey: "acLearn")
+        defaults.set(learnFromScreen, forKey: "acLearnScreen")
         defaults.set(excludedApps, forKey: "acExcluded")
         defaults.set(modelFile, forKey: "acModel")
     }
@@ -105,9 +113,11 @@ final class Autocomplete: ObservableObject {
         guard !paused else { return }
         installTap()
         restartServer()
+        updateScreenLearning()
     }
 
     private func stop() {
+        screenTimer?.invalidate(); screenTimer = nil
         removeTap()
         hide()
         server?.terminate(); server = nil
@@ -288,10 +298,10 @@ final class Autocomplete: ObservableObject {
     }
 
     /// Visible text in the focused window (other than the field being typed in), for context.
-    private func visibleText(_ window: AXUIElement, excluding own: String) -> String {
+    private func visibleText(_ window: AXUIElement, excluding own: String, limit: Int = 1200) -> String {
         var out: [String] = [], total = 0, visited = 0
         func walk(_ el: AXUIElement, _ depth: Int) {
-            guard depth < 14, visited < 600, total < 1200 else { return }
+            guard depth < 14, visited < 600, total < limit else { return }
             visited += 1
             let role: String? = copy(el, kAXRoleAttribute)
             if role == "AXStaticText" || role == "AXHeading", let v: String = copy(el, kAXValueAttribute),
@@ -302,7 +312,7 @@ final class Autocomplete: ObservableObject {
             for k in kids { walk(k, depth + 1) }
         }
         walk(window, 0)
-        return String(out.joined(separator: " · ").prefix(1200))
+        return String(out.joined(separator: " · ").prefix(limit))
     }
 
     // MARK: suggestions
@@ -332,6 +342,8 @@ final class Autocomplete: ObservableObject {
         p += ". Continue it naturally with the next few words, in the writer's own voice.\n"
         p += "Writing style: \(style.trimmingCharacters(in: .whitespacesAndNewlines))\n"
         if let s = screen, !s.isEmpty { p += "Also visible on screen: \(s)\n" }
+        let terms = relevantTerms(for: prefix)
+        if !terms.isEmpty { p += "Names and terms the writer often sees and uses: \(terms.joined(separator: ", "))\n" }
         let examples = similarHistory(to: prefix)
         if !examples.isEmpty { p += "Examples of how the writer phrases things:\n" + examples.map { "- \($0)" }.joined(separator: "\n") + "\n" }
         return p + "---\n" + prefix
@@ -454,6 +466,111 @@ final class Autocomplete: ObservableObject {
     }
 
     func forgetHistory() { history = []; saveHistory() }
+
+    // MARK: learning from the screen (vocabulary only)
+
+    private var vocabURL: URL { folder.appendingPathComponent("autocomplete-vocabulary.json") }
+
+    private func loadVocabulary() {
+        vocabulary = (try? JSONDecoder().decode([String: Term].self, from: Data(contentsOf: vocabURL))) ?? [:]
+    }
+
+    private func saveVocabulary() {
+        try? JSONEncoder().encode(vocabulary).write(to: vocabURL, options: [.atomic, .completeFileProtection])
+    }
+
+    func forgetVocabulary() { vocabulary = [:]; saveVocabulary() }
+
+    /// Most-seen terms first (for Settings).
+    var topTerms: [String] { vocabulary.sorted { ($0.value.count, $0.value.lastSeen) > ($1.value.count, $1.value.lastSeen) }.map(\.key) }
+
+    private func updateScreenLearning() {
+        screenTimer?.invalidate(); screenTimer = nil
+        guard enabled, learnFromScreen else { return }
+        screenTimer = Timer.scheduledTimer(withTimeInterval: 180, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.learnFromCurrentScreen() }
+        }
+        screenTimer?.tolerance = 30
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in self?.learnFromCurrentScreen() }
+    }
+
+    /// Reads the visible text of the frontmost window and keeps recurring names and terms.
+    func learnFromCurrentScreen() {
+        guard enabled, learnFromScreen, !paused, !IsSecureEventInputEnabled(), !Self.screenLocked,
+              let front = NSWorkspace.shared.frontmostApplication, !excludedApps.contains(front.bundleIdentifier ?? "") else { return }
+        let app = AXUIElementCreateApplication(front.processIdentifier)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+        guard let window: AXUIElement = copy(app, kAXFocusedWindowAttribute) else { return }
+        let text = visibleText(window, excluding: "", limit: 6000)
+        let now = Date()
+        for term in Self.extractTerms(from: text) {
+            vocabulary[term, default: Term(count: 0, lastSeen: now)].count += 1
+            vocabulary[term]?.lastSeen = now
+        }
+        // Keep the 500 most useful terms; forget ones not seen for 60 days.
+        let cutoff = now.addingTimeInterval(-60 * 86_400)
+        vocabulary = vocabulary.filter { $0.value.lastSeen > cutoff }
+        if vocabulary.count > 500 {
+            vocabulary = Dictionary(uniqueKeysWithValues: vocabulary.sorted { $0.value.count > $1.value.count }.prefix(500).map { ($0.key, $0.value) })
+        }
+        saveVocabulary()
+    }
+
+    private static var screenLocked: Bool {
+        (CGSessionCopyCurrentDictionary() as? [String: Any])?["CGSSessionScreenIsLocked"] as? Bool ?? false
+    }
+
+    /// Candidate vocabulary: capitalised names and phrases (not at the start of a sentence), CamelCase
+    /// and words with digits (e.g. "FanCurve", "M5"). Common words are ignored.
+    static func extractTerms(from text: String) -> Set<String> {
+        let stop: Set<String> = ["The", "This", "That", "These", "Those", "There", "Then", "They", "What", "When", "Where", "Which",
+                                 "Who", "Why", "How", "And", "But", "For", "With", "From", "Your", "You", "Our", "His", "Her",
+                                 "Its", "Not", "All", "Any", "Can", "Will", "Just", "New", "Open", "Close", "Save", "Edit",
+                                 "View", "File", "Help", "Window", "Settings", "Search", "Today", "Yesterday", "Tomorrow",
+                                 "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "January",
+                                 "February", "March", "April", "May", "June", "July", "August", "September", "October",
+                                 "November", "December", "Yes", "No", "OK", "Cancel", "Done", "Reply", "Forward", "Delete",
+                                 "Hi", "Hello", "Hey", "Dear", "Also", "Thanks", "Thank", "Please", "So", "If", "As", "In",
+                                 "On", "At", "We", "It", "He", "She", "My", "Maybe", "Sure", "Great", "Good", "Best", "Regards"]
+        var out = Set<String>()
+        for sentence in text.components(separatedBy: CharacterSet(charactersIn: ".!?·\n")) {
+            let words = sentence.split(whereSeparator: { $0.isWhitespace || ",;:()[]\"“”'".contains($0) }).map(String.init)
+            var run: [String] = []
+            func flush() {
+                while let f = run.first, stop.contains(f) { run.removeFirst() }   // "Hi Thijs" → "Thijs"
+                if run.count >= 2 { out.insert(run.prefix(3).joined(separator: " ")) }
+                else if let w = run.first, w.count >= 4, !stop.contains(w) { out.insert(w) }
+                run = []
+            }
+            for (i, w) in words.enumerated() {
+                let clean = w.trimmingCharacters(in: .punctuationCharacters)
+                guard clean.count >= 2, clean.count <= 30, clean.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" }) else { flush(); continue }
+                let camel = clean.dropFirst().contains(where: \.isUppercase) && clean.contains(where: \.isLowercase)
+                // Words mixing letters and digits (M5, iOS26), but not version numbers like v2026.
+                let version = clean.first.map { "vV".contains($0) } == true && clean.dropFirst().allSatisfy { $0.isNumber || $0 == "." }
+                let digits = clean.contains(where: \.isNumber) && clean.contains(where: \.isLetter) && !version
+                // A capital at the start of a sentence only counts when the next word is capitalised too ("Spike Reply").
+                let nextCapital = i + 1 < words.count && words[i + 1].first?.isUppercase == true
+                let capital = clean.first!.isUppercase && (i > 0 || nextCapital) && (!stop.contains(clean) || !run.isEmpty)
+                if camel || digits { flush(); out.insert(clean); continue }
+                if capital { run.append(clean) } else { flush() }
+            }
+            flush()
+        }
+        return out
+    }
+
+    /// Up to 20 learned terms, preferring ones that match the word being typed, then the most frequent.
+    private func relevantTerms(for prefix: String) -> [String] {
+        guard learnFromScreen, !vocabulary.isEmpty else { return [] }
+        let partial = prefix.split(whereSeparator: { $0.isWhitespace }).last.map { String($0).lowercased() } ?? ""
+        let seen = vocabulary.filter { $0.value.count >= 2 }
+        let matching = partial.count >= 2 ? seen.keys.filter { $0.lowercased().hasPrefix(partial) } : []
+        let frequent = seen.sorted { $0.value.count > $1.value.count }.map(\.key)
+        var picked: [String] = []
+        for t in Array(matching) + frequent where !picked.contains(t) { picked.append(t); if picked.count == 20 { break } }
+        return picked
+    }
 
     /// Up to three past lines that share the most words with what's being typed.
     private func similarHistory(to prefix: String) -> [String] {

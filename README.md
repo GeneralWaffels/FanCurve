@@ -124,7 +124,7 @@ A Raycast-style glass search panel:
 - **Suggestions as you type**, in any app, from a local model (llama.cpp running a GGUF model such as Gemma 4 E2B). Suggestions arrive in about 0.1 s on Apple Silicon, and nothing leaves your Mac.
 - **Keys:** Tab accepts the whole suggestion, ⌥→ accepts the next word, and Esc dismisses it. ⌃⌥A pauses or resumes.
 - **Context:** it uses the text before your cursor, the app you're in, and optionally the visible text in the window.
-- **Personalisation:** your writing-style prompt, plus examples of your own writing (lines you finish and suggestions you accept), all stored locally.
+- **Personalisation:** your writing-style prompt, plus examples of your own writing (lines you finish and suggestions you accept). Optionally it also learns names and terms that keep appearing on screen, checking every few minutes; it keeps vocabulary only, never whole sentences. All of it is stored locally.
 - **Skipped:** password fields, and any app you exclude.
 - **Setup:** `brew install llama.cpp`, then put a `.gguf` model in `~/Library/Application Support/FanCurve/Models` (or import one from Cotypist).
 
