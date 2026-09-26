@@ -71,6 +71,7 @@ struct FanCurveApp: App {
                 quickNotes.toggleWindow()
             })
 
+        shortcuts.setUpLayoutShortcuts(aero)
         _model = StateObject(wrappedValue: model)
         _keyboard = StateObject(wrappedValue: keyboard)
         _displays = StateObject(wrappedValue: displays)

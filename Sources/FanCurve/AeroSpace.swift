@@ -113,6 +113,29 @@ final class AeroSpace: ObservableObject {
 
     enum Layout { case halfStackedQuarters, halfQuarterColumns }
 
+    /// Layout/width actions that can have global shortcuts (id → title), shared by Settings and the palette.
+    static let shortcutActions: [(id: String, title: String)] = [
+        ("stack", "Half + Two Quarters (Stacked)"), ("cols", "Half + Two Quarter Columns"),
+        ("w2", "Width: ½ of Screen"), ("w3", "Width: ⅓ of Screen"), ("w4", "Width: ¼ of Screen"),
+        ("w23", "Width: ⅔ of Screen"), ("w34", "Width: ¾ of Screen"),
+    ]
+
+    func run(action id: String) {
+        switch id {
+        case "stack": applyLayout(.halfStackedQuarters)
+        case "cols": applyLayout(.halfQuarterColumns)
+        case "w2": resizeFocused(widthFraction: 0.5)
+        case "w3": resizeFocused(widthFraction: 1.0 / 3)
+        case "w4": resizeFocused(widthFraction: 0.25)
+        case "w23": resizeFocused(widthFraction: 2.0 / 3)
+        case "w34": resizeFocused(widthFraction: 0.75)
+        default: break
+        }
+    }
+
+    /// Filled in by the app so palette rows can show their shortcut.
+    var shortcutLabel: (String) -> String? = { _ in nil }
+
     /// Rebuilds the focused workspace: the focused window takes the left half; the others fill the
     /// right half, either stacked (each a quarter of the screen) or as quarter-width columns.
     func applyLayout(_ layout: Layout) {
@@ -278,11 +301,13 @@ final class AeroSpaceSource: PanelSource {
             cmd("balance", "Balance Window Sizes", nil, "equal.square", ["balance-sizes"], ["balance", "equal"]),
             PanelItem(id: "aero.layout.stack", section: "AeroSpace Layouts", title: "Half + Two Quarters (Stacked)",
                       subtitle: "Focused window on the left half; the others stacked on the right, a quarter each",
+                      accessory: a.shortcutLabel("stack"),
                       symbol: "rectangle.split.2x1", tint: tint, keywords: ["aerospace", "layout", "half", "quarter", "split", "stack"]) {
                 a.applyLayout(.halfStackedQuarters); return true
             },
             PanelItem(id: "aero.layout.cols", section: "AeroSpace Layouts", title: "Half + Two Quarter Columns",
                       subtitle: "Three columns: ½ · ¼ · ¼ (focused window gets the half)",
+                      accessory: a.shortcutLabel("cols"),
                       symbol: "rectangle.split.3x1", tint: tint, keywords: ["aerospace", "layout", "half", "quarter", "columns"]) {
                 a.applyLayout(.halfQuarterColumns); return true
             },
@@ -294,10 +319,11 @@ final class AeroSpaceSource: PanelSource {
                       symbol: "doc.text", tint: tint, keywords: ["aerospace", "config", "edit", "toml"]) { a.openConfig(); return true },
         ]
 
-        for (label, f, sym) in [("½", 0.5, "rectangle.lefthalf.filled"), ("⅓", 1.0 / 3, "rectangle.split.3x1"), ("¼", 0.25, "rectangle.leadingthird.inset.filled"),
-                                ("⅔", 2.0 / 3, "rectangle.split.2x1"), ("¾", 0.75, "rectangle.inset.filled")] {
+        for (label, f, sym, key) in [("½", 0.5, "rectangle.lefthalf.filled", "w2"), ("⅓", 1.0 / 3, "rectangle.split.3x1", "w3"),
+                                     ("¼", 0.25, "rectangle.leadingthird.inset.filled", "w4"), ("⅔", 2.0 / 3, "rectangle.split.2x1", "w23"),
+                                     ("¾", 0.75, "rectangle.inset.filled", "w34")] {
             items.append(PanelItem(id: "aero.width.\(label)", section: "AeroSpace Layouts", title: "Width: \(label) of Screen",
-                                   subtitle: "Resize the focused window", symbol: sym, tint: tint,
+                                   subtitle: "Resize the focused window", accessory: a.shortcutLabel(key), symbol: sym, tint: tint,
                                    keywords: ["aerospace", "resize", "width", "size", label == "½" ? "half" : label == "¼" ? "quarter" : label == "⅓" ? "third" : ""]) {
                 a.resizeFocused(widthFraction: CGFloat(f)); return true
             })

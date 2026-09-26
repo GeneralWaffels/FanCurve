@@ -1,3 +1,4 @@
+import Carbon.HIToolbox
 import EventKit
 import SwiftUI
 
@@ -10,11 +11,23 @@ final class AppShortcuts: ObservableObject {
     let schedule: ShortcutSetting
     let snippets: ShortcutSetting
     let quickNotes: ShortcutSetting
+    /// AeroSpace layout/width shortcuts, keyed by AeroSpace.shortcutActions id.
+    var layouts: [String: ShortcutSetting] = [:]
 
     init(palette: ShortcutSetting, joinMeeting: ShortcutSetting, schedule: ShortcutSetting, snippets: ShortcutSetting,
          quickNotes: ShortcutSetting) {
         self.palette = palette; self.joinMeeting = joinMeeting; self.schedule = schedule; self.snippets = snippets
         self.quickNotes = quickNotes
+    }
+
+    /// Registers one global shortcut per AeroSpace layout action (⌃⌥Q / ⌃⌥W for the two presets).
+    func setUpLayoutShortcuts(_ aero: AeroSpace) {
+        let defaults: [String: Shortcut] = ["stack": .ctrlOpt(kVK_ANSI_Q, "Q"), "cols": .ctrlOpt(kVK_ANSI_W, "W")]
+        for (i, action) in AeroSpace.shortcutActions.enumerated() {
+            layouts[action.id] = ShortcutSetting(key: "aeroShortcut." + action.id, id: 20 + UInt32(i),
+                                                 default: defaults[action.id]) { [weak aero] in aero?.run(action: action.id) }
+        }
+        aero.shortcutLabel = { [weak self] id in self?.layouts[id]?.shortcut?.display }
     }
 }
 
@@ -315,6 +328,16 @@ struct LauncherPage: View {
                     Footer("Type \"aerospace\" or a workspace name in the palette. Settings commands edit \(aero.configURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) and reload AeroSpace; a backup is saved next to it (.fancurve-backup) before the first change.")
                 }
                 .onAppear { aero.refresh() }
+
+                Section {
+                    ForEach(AeroSpace.shortcutActions, id: \.id) { action in
+                        if let setting = shortcuts.layouts[action.id] { ShortcutRow(title: action.title, setting: setting) }
+                    }
+                } header: {
+                    Text("AeroSpace Layout Shortcuts")
+                } footer: {
+                    Footer("Work from any app. The layouts give the focused window the left half. ⌃⌥ combinations don't clash with AeroSpace's ⌥ and ⌥⇧ bindings.")
+                }
             }
         }
         .formStyle(.grouped)

@@ -188,6 +188,9 @@ All shortcuts can be changed in Settings. The defaults avoid AeroSpace's default
 | Show schedule | ⌃⌥C |
 | Search snippets | ⌃⌥S |
 | Quick Notes | ⌃⌥N |
+| AeroSpace: Half + Two Quarters (stacked) | ⌃⌥Q |
+| AeroSpace: Half + Two Quarter Columns | ⌃⌥W |
+| AeroSpace: width ½ ⅓ ¼ ⅔ ¾ | set your own |
 | In the palette: launch a favourite / pin the selected app | ⌘1–9 / ⌘F |
 
 ## How it works

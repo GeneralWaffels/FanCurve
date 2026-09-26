@@ -27,7 +27,8 @@ enum DebugSnapshot {
             }
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 NSApp.appearance = NSAppearance(named: appearance)   // app-wide, so SwiftUI content follows too
-                for page in AppNav.Page.allCases {
+                let only = CommandLine.arguments.firstIndex(of: "--page").map { CommandLine.arguments[$0 + 1] }
+                for page in AppNav.Page.allCases where only == nil || page.rawValue == only {
                     AppNav.shared.page = page
                     try? await Task.sleep(for: .milliseconds(900))
                     let name = "\(page.rawValue)-\(appearance == .aqua ? "light" : "dark").png"
@@ -36,6 +37,7 @@ enum DebugSnapshot {
                     }
                 }
             }
+            if CommandLine.arguments.contains("--page") { exit(0) }
             NSApp.appearance = NSAppearance(named: .darkAqua)
             // The command palette itself: suggestions, then a calculator query.
             LauncherPanel.shared.keepOpenOnResign = true
