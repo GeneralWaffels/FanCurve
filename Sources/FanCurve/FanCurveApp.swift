@@ -36,16 +36,18 @@ struct FanCurveApp: App {
     @StateObject private var aero: AeroSpace
     @StateObject private var favourites: Favourites
     @StateObject private var obsidian: Obsidian
+    @StateObject private var quickNotes: QuickNotes
 
     init() {
         let model = Model(), keyboard = KeyboardBlocker(), displays = Displays(), mic = MicMuter()
-        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites(), obsidian = Obsidian()
+        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites(), obsidian = Obsidian(), quickNotes = QuickNotes()
+        quickNotes.obsidian = obsidian
         favourites.aero = aero
         LauncherPanel.shared.favourites = favourites
         calendar.onJoin = { [weak mic] in mic?.setMuted(true) }
 
         let palette = CommandSource(.init(model: model, mic: mic, keyboard: keyboard, displays: displays, calendar: calendar,
-                                          snippets: snippets, updater: updater, aero: aero, favourites: favourites, obsidian: obsidian,
+                                          snippets: snippets, updater: updater, aero: aero, favourites: favourites, obsidian: obsidian, quickNotes: quickNotes,
                                           openSettings: { NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil) }))
         let schedule = ScheduleSource(calendar: calendar)
         let snippetSearch = SnippetSource(store: snippets)
@@ -63,6 +65,9 @@ struct FanCurveApp: App {
             },
             snippets: ShortcutSetting(key: "snippetShortcut", id: 4, default: .ctrlOpt(kVK_ANSI_S, "S")) {
                 LauncherPanel.shared.toggle(snippetSearch)
+            },
+            quickNotes: ShortcutSetting(key: "quickNotesShortcut", id: 6, default: .ctrlOpt(kVK_ANSI_N, "N")) {
+                quickNotes.toggleWindow()
             })
 
         _model = StateObject(wrappedValue: model)
@@ -77,12 +82,13 @@ struct FanCurveApp: App {
         _aero = StateObject(wrappedValue: aero)
         _favourites = StateObject(wrappedValue: favourites)
         _obsidian = StateObject(wrappedValue: obsidian)
+        _quickNotes = StateObject(wrappedValue: quickNotes)
     }
 
     var body: some Scene {
         MenuBarExtra {
             MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav).environmentObject(updater)
-                .environmentObject(calendar).environmentObject(shortcuts)
+                .environmentObject(calendar).environmentObject(shortcuts).environmentObject(quickNotes)
         } label: {
             MenuBarLabel(nav: nav) {
                 if keyboard.isOn {
@@ -99,7 +105,7 @@ struct FanCurveApp: App {
                 .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
                 .environmentObject(brightnessKeys).environmentObject(loginItem).environmentObject(updater)
                 .environmentObject(calendar).environmentObject(snippets).environmentObject(shortcuts).environmentObject(aero)
-                .environmentObject(favourites).environmentObject(obsidian)
+                .environmentObject(favourites).environmentObject(obsidian).environmentObject(quickNotes)
         }
         .defaultSize(width: 760, height: 680)
         .windowToolbarStyle(.unified)
@@ -149,6 +155,7 @@ struct MenuContent: View {
     @EnvironmentObject var updater: Updater
     @EnvironmentObject var calendar: CalendarStore
     @EnvironmentObject var shortcuts: AppShortcuts
+    @EnvironmentObject var quickNotes: QuickNotes
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -190,6 +197,7 @@ struct MenuContent: View {
         Button("Command Palette\(shortcuts.palette.shortcut.map { "  (\($0.display))" } ?? "")") {
             NotificationCenter.default.post(name: AppDelegate.openPalette, object: nil)
         }
+        Button("Quick Notes\(shortcuts.quickNotes.shortcut.map { "  (\($0.display))" } ?? "")") { quickNotes.showWindow() }
         Button("Settings…") { nav.openSettings(openWindow) }.keyboardShortcut(",")
         Button("Quit FanCurve") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }

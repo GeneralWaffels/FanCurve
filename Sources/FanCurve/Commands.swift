@@ -18,6 +18,7 @@ final class CommandSource: PanelSource {
         let aero: AeroSpace
         let favourites: Favourites
         let obsidian: Obsidian
+        let quickNotes: QuickNotes
         let openSettings: () -> Void
     }
 
@@ -71,6 +72,8 @@ final class CommandSource: PanelSource {
         }
         commands = favItems + commands + appItems
         let q = query.trimmingCharacters(in: .whitespaces)
+        let newNote = PanelItem(id: "qn.newroot", section: "Create", title: "New Quick Note", subtitle: "“\(q)”",
+                                symbol: "square.and.pencil", tint: .yellow) { [d] in d.quickNotes.showWindow(select: d.quickNotes.create(q)); return true }
         let searchFiles = PanelItem(id: "files.for", section: "Files", title: "Search Files for “\(q)”",
                                     subtitle: "Spotlight", symbol: "doc.text.magnifyingglass", tint: .gray) {
             LauncherPanel.shared.show(FileSearchSource.shared, query: q); return true
@@ -83,9 +86,9 @@ final class CommandSource: PanelSource {
                           subtitle: r.note.folder.isEmpty ? obs.vault?.name : r.note.folder, accessory: "Note",
                           image: obs.appIcon) { obs.open(r.note); return true }
             }
-            return out + commands.filtered(query) + notes + [searchFiles]
+            return out + commands.filtered(query) + notes + [newNote, searchFiles]
         }
-        return out + commands.filtered(query) + (q.count >= 2 ? [searchFiles] : [])
+        return out + commands.filtered(query) + (q.count >= 2 ? [newNote, searchFiles] : [])
     }
 
     // MARK: sections
@@ -131,6 +134,11 @@ final class CommandSource: PanelSource {
             PanelItem(id: "mic", section: "FanCurve", title: mic.isMuted ? "Unmute Microphone" : "Mute Microphone",
                       accessory: mic.shortcut?.display, symbol: mic.isMuted ? "mic.slash.fill" : "mic.fill", tint: .red,
                       keywords: ["mute", "mic", "microphone", "unmute"]) { mic.toggle(); return true },
+            PanelItem(id: "qn.open", section: "FanCurve", title: "Quick Notes", subtitle: "Open the notes window",
+                      accessory: "⌃⌥N", symbol: "note.text", tint: .yellow,
+                      keywords: ["note", "notes", "quick", "scratch", "jot", "raycast notes"]) { [d] in d.quickNotes.showWindow(); return true },
+            PanelItem(id: "qn.search", section: "FanCurve", title: "Search Quick Notes", symbol: "doc.text.magnifyingglass", tint: .yellow,
+                      keywords: ["note", "notes", "search"]) { [d] in LauncherPanel.shared.show(QuickNotesSource(store: d.quickNotes)); return true },
             PanelItem(id: "snippets", section: "FanCurve", title: "Search Snippets", symbol: "text.quote", tint: .orange,
                       keywords: ["snippet", "text", "expand", "paste"]) {
                 LauncherPanel.shared.show(SnippetSource(store: snips)); return true

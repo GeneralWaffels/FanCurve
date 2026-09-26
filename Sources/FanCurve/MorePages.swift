@@ -9,9 +9,12 @@ final class AppShortcuts: ObservableObject {
     let joinMeeting: ShortcutSetting
     let schedule: ShortcutSetting
     let snippets: ShortcutSetting
+    let quickNotes: ShortcutSetting
 
-    init(palette: ShortcutSetting, joinMeeting: ShortcutSetting, schedule: ShortcutSetting, snippets: ShortcutSetting) {
+    init(palette: ShortcutSetting, joinMeeting: ShortcutSetting, schedule: ShortcutSetting, snippets: ShortcutSetting,
+         quickNotes: ShortcutSetting) {
         self.palette = palette; self.joinMeeting = joinMeeting; self.schedule = schedule; self.snippets = snippets
+        self.quickNotes = quickNotes
     }
 }
 
@@ -222,6 +225,31 @@ private struct SnippetEditor: View {
     }
 }
 
+// MARK: - Quick notes settings
+
+struct QuickNotesSection: View {
+    @EnvironmentObject var shortcuts: AppShortcuts
+    @EnvironmentObject var notes: QuickNotes
+
+    var body: some View {
+        Section {
+            ShortcutRow(title: "Open Quick Notes", setting: shortcuts.quickNotes)
+            Toggle("Keep the notes window on top", isOn: $notes.alwaysOnTop)
+            LabeledContent("Notes") {
+                HStack {
+                    Text("\(notes.notes.count)").monospacedDigit().foregroundStyle(.secondary)
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([notes.folder]) }
+                    Button("Open") { notes.showWindow() }
+                }
+            }
+        } header: {
+            Text("Quick Notes")
+        } footer: {
+            Footer("A floating scratchpad like Raycast Notes. Type in the palette and choose New Quick Note, or press the shortcut. Notes save as you type; move one into Obsidian with the ↑ button.")
+        }
+    }
+}
+
 // MARK: - Command palette
 
 struct LauncherPage: View {
@@ -245,12 +273,15 @@ struct LauncherPage: View {
 
             FavouritesSection()
 
+            QuickNotesSection()
+
             Section("What You Can Search") {
                 feature("star.fill", .yellow, "Favourites", "Pinned apps first; ⌘1–9 launches them, ⌘F pins the selected app.")
                 feature("square.grid.2x2.fill", .blue, "Applications", "Open any app by typing part of its name.")
                 feature("fan.fill", .blue, "Fans", "Turn the curve on or off and switch profiles.")
                 feature("video.fill", .red, "Meetings", "Join the next call or open your schedule.")
                 feature("text.quote", .orange, "Snippets", "Search and paste saved text.")
+                feature("note.text", .yellow, "Quick Notes", "Jot something down instantly; it saves as you type.")
                 feature("equal", .orange, "Calculator", "Type 23*1.21 and press Return to copy the answer.")
                 feature("mic.fill", .red, "Microphone & Displays", "Mute, set external brightness, clean the keyboard.")
                 feature("moon.fill", .indigo, "System", "Lock, sleep, screen saver and dark mode.")

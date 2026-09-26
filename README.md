@@ -66,6 +66,8 @@ A Raycast-style glass search panel:
 - **Calculator:** type `23*1.21`, and pressing Return copies the answer.
 - **FanCurve commands:** turn the fan curve on or off, switch profiles, mute the mic, set external brightness, keyboard cleaning mode.
 - **System commands:** lock screen, sleep, screen saver, toggle dark mode.
+- **Quick Notes (⌃⌥N):** a floating scratchpad like Raycast Notes. Type in the palette and choose *New Quick Note*, or press the shortcut. Notes save as you type, and you can search them from the palette or move one into Obsidian with a click.
+- **Spotlight file search** inside the palette, useful when ⌘Space belongs to the palette.
 - **[Obsidian](https://obsidian.md) integration**, like Raycast's Obsidian extension:
   - **Search notes** by title or by text, with a snippet showing the match.
   - **Capture to your daily note:** type a thought and choose *Append to Daily Note*. It works with any daily-note layout, which FanCurve detects from your existing notes.
@@ -167,6 +169,7 @@ All shortcuts can be changed in Settings. The defaults avoid AeroSpace's default
 | Join next meeting | ⌃⌥J |
 | Show schedule | ⌃⌥C |
 | Search snippets | ⌃⌥S |
+| Quick Notes | ⌃⌥N |
 | In the palette: launch a favourite / pin the selected app | ⌘1–9 / ⌘F |
 
 ## How it works

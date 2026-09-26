@@ -47,6 +47,16 @@ enum DebugSnapshot {
                     try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name + ".png"))
                 }
             }
+            // Quick Notes window with a temporary sample note (removed again afterwards).
+            if let qn = QuickNotes.current {
+                let id = qn.create("Weekend plans\n\n- Pick up the bike from the shop\n- Book a table for Saturday\n- Call Mum about Sunday lunch\n\nIdeas: try the new coffee place on the corner.")
+                qn.showWindow(select: id)
+                try? await Task.sleep(for: .seconds(1.2))
+                if let n = qn.windowNumber, let cg = windowImage(n) {
+                    try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("quick-notes.png"))
+                }
+                try? FileManager.default.removeItem(at: qn.folder.appendingPathComponent(id))
+            }
             // Spotlight file search mode.
             LauncherPanel.shared.show(FileSearchSource.shared, query: "fancurve")
             try? await Task.sleep(for: .seconds(2))
