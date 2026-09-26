@@ -15,6 +15,15 @@ final class AppShortcuts: ObservableObject {
     var autocompletePause: ShortcutSetting?
     var autocompleteNow: ShortcutSetting?
     var draftReply: ShortcutSetting?
+    var clipboard: ShortcutSetting?
+    /// Window snapping shortcuts, keyed by WindowSnap.actions id (none set by default).
+    var windows: [String: ShortcutSetting] = [:]
+
+    func setUpWindowShortcuts() {
+        for (i, a) in WindowSnap.actions.enumerated() {
+            windows[a.id] = ShortcutSetting(key: "windowShortcut." + a.id, id: 40 + UInt32(i), default: nil) { WindowSnap.run(a.id) }
+        }
+    }
     /// AeroSpace layout/width shortcuts, keyed by AeroSpace.shortcutActions id.
     var layouts: [String: ShortcutSetting] = [:]
 
@@ -118,6 +127,8 @@ struct CalendarPage: View {
                     Toggle("Hide all-day events", isOn: $cal.hideAllDay)
                     Toggle("Hide declined events", isOn: $cal.hideDeclined)
                 }
+
+                WorkingHoursSection()
 
                 Section("Calendars") {
                     ForEach(cal.calendars, id: \.calendarIdentifier) { c in
@@ -487,6 +498,72 @@ struct QuickNotesSection: View {
 
 // MARK: - Command palette
 
+/// Working hours for "Copy My Availability".
+struct WorkingHoursSection: View {
+    @AppStorage("calWorkStart") private var start = 9
+    @AppStorage("calWorkEnd") private var end = 17
+
+    var body: some View {
+        Section {
+            Stepper("Working day starts at \(start):00", value: $start, in: 0...(end - 1))
+            Stepper("Working day ends at \(end):00", value: $end, in: (start + 1)...24)
+        } header: {
+            Text("Availability")
+        } footer: {
+            Footer("In the palette, “Copy My Availability” copies your free times in these hours over the next three working days. Create events by typing, for example “event lunch with Sam tomorrow at 1pm for 45 min”.")
+        }
+    }
+}
+
+/// Clipboard history settings.
+struct ClipboardSection: View {
+    @EnvironmentObject var clipboard: ClipboardHistory
+    @EnvironmentObject var shortcuts: AppShortcuts
+
+    var body: some View {
+        Section {
+            Toggle(isOn: $clipboard.enabled) {
+                Text("Clipboard history")
+                Text("Remembers text you copy so you can search and paste it again.")
+            }
+            if clipboard.enabled {
+                if let s = shortcuts.clipboard { ShortcutRow(title: "Open clipboard history", setting: s) }
+                Picker("Keep items for", selection: $clipboard.keepDays) {
+                    Text("1 day").tag(1); Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90)
+                }
+                LabeledContent("Saved") {
+                    HStack {
+                        Text("\(clipboard.entries.count) items").monospacedDigit().foregroundStyle(.secondary)
+                        Button("Clear") { clipboard.clear() }.disabled(clipboard.entries.isEmpty)
+                    }
+                }
+            }
+        } header: {
+            Text("Clipboard")
+        } footer: {
+            Footer("Stored only on this Mac. Passwords and anything copied from password managers are never saved. In the list, ⌘P pins an item and ⌘⌫ deletes it.")
+        }
+    }
+}
+
+/// Shortcuts for snapping windows without AeroSpace.
+struct WindowShortcutsSection: View {
+    @EnvironmentObject var shortcuts: AppShortcuts
+    @EnvironmentObject var aero: AeroSpace
+
+    var body: some View {
+        Section {
+            ForEach(WindowSnap.actions) { a in
+                if let s = shortcuts.windows[a.id] { ShortcutRow(title: a.title, setting: s) }
+            }
+        } header: {
+            Text("Window Snapping")
+        } footer: {
+            Footer("Move and resize the front window into halves, thirds or quarters, or type “left half” in the palette. No shortcuts are set by default." + (aero.running ? " AeroSpace re-tiles windows it manages, so float a window first (or use the AeroSpace layouts)." : ""))
+        }
+    }
+}
+
 struct LauncherPage: View {
     @EnvironmentObject var shortcuts: AppShortcuts
     @EnvironmentObject var aero: AeroSpace
@@ -510,6 +587,10 @@ struct LauncherPage: View {
 
             QuickNotesSection()
 
+            ClipboardSection()
+
+            QuicklinksSection()
+
             Section("What You Can Search") {
                 feature("star.fill", .yellow, "Favourites", "Pinned apps first; ⌘1–9 launches them, ⌘F pins the selected app.")
                 feature("square.grid.2x2.fill", .blue, "Applications", "Open any app by typing part of its name.")
@@ -519,6 +600,10 @@ struct LauncherPage: View {
                 feature("note.text", .yellow, "Quick Notes", "Jot something down instantly; it saves as you type.")
                 feature("equal", .orange, "Calculator", "Type 23*1.21 and press Return to copy the answer.")
                 feature("mic.fill", .red, "Microphone & Displays", "Mute, set external brightness, clean the keyboard.")
+                feature("doc.on.clipboard", .blue, "Clipboard History", "Search everything you copied and paste it again.")
+                feature("link", .blue, "Quicklinks", "Type “gh fancurve” to search GitHub, or add your own sites.")
+                feature("calendar.badge.plus", .red, "Create Events", "“event lunch with Sam tomorrow at 1pm”, plus copy your availability.")
+                feature("rectangle.split.2x1", .purple, "Window Snapping", "Halves, thirds, quarters, maximise and next display.")
                 feature("moon.fill", .indigo, "System", "Lock, sleep, screen saver and dark mode.")
                 if obsidian.installed {
                     feature("books.vertical.fill", .purple, "Obsidian", "Search notes, capture to your daily note, create notes.")
@@ -561,6 +646,8 @@ struct LauncherPage: View {
                     Footer("Work from any app. The layouts give the focused window the left half. ⌃⌥ combinations don't clash with AeroSpace's ⌥ and ⌥⇧ bindings.")
                 }
             }
+
+            WindowShortcutsSection()
         }
         .formStyle(.grouped)
     }

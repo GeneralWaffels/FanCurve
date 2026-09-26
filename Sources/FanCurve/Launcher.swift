@@ -79,8 +79,18 @@ struct PanelItem: Identifiable {
     var boost = 0
     var tint: Color = .accentColor
     var keywords: [String] = []
+    /// Extra ⌘-key actions for this row (shown in the footer), e.g. ⌘P to pin.
+    var actions: [PanelAction] = []
     /// Run when the row is chosen. Return false to keep the panel open.
     let run: () -> Bool
+}
+
+/// A ⌘-key action on a panel row. `key` is the character pressed with ⌘ ("p", or "\u{7f}" for ⌫).
+struct PanelAction {
+    let key: String
+    let display: String
+    let label: String
+    let run: () -> Void
 }
 
 /// Supplies rows for a panel mode (commands, schedule, snippets, …).
@@ -175,7 +185,13 @@ final class LauncherPanel: NSObject, NSWindowDelegate {
     }
 
     private func handleCommandKey(_ chars: String, windowNumber: Int?) -> Bool {
-        guard windowNumber == panel?.windowNumber, let favs = favourites else { return false }
+        guard windowNumber == panel?.windowNumber else { return false }
+        if model.items.indices.contains(model.selection), let a = model.items[model.selection].actions.first(where: { $0.key == chars }) {
+            a.run()
+            model.reload()
+            return true
+        }
+        guard let favs = favourites else { return false }
         if let n = Int(chars), (1...9).contains(n) {
             close()
             favs.launch(n - 1)
@@ -285,6 +301,9 @@ struct LauncherView: View {
                 Spacer()
                 if model.items.indices.contains(model.selection), let url = model.items[model.selection].appURL {
                     KeyHint(keys: "⌘F", label: panel.favourites?.contains(url) == true ? "Unfavourite" : "Favourite")
+                }
+                if model.items.indices.contains(model.selection) {
+                    ForEach(model.items[model.selection].actions, id: \.key) { KeyHint(keys: $0.display, label: $0.label) }
                 }
                 KeyHint(keys: "↩", label: "Open")
                 KeyHint(keys: "↑↓", label: "Navigate")

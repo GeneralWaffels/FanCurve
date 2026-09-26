@@ -39,10 +39,13 @@ struct FanCurveApp: App {
     @StateObject private var quickNotes: QuickNotes
     @StateObject private var jiggler: MouseJiggler
     @StateObject private var autocomplete: Autocomplete
+    @StateObject private var clipboard: ClipboardHistory
+    @StateObject private var quicklinks: Quicklinks
 
     init() {
         let model = Model(), keyboard = KeyboardBlocker(), displays = Displays(), mic = MicMuter()
         let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites(), obsidian = Obsidian(), quickNotes = QuickNotes(), jiggler = MouseJiggler(), autocomplete = Autocomplete()
+        let clipboard = ClipboardHistory(), quicklinks = Quicklinks()
         quickNotes.obsidian = obsidian
         favourites.aero = aero
         LauncherPanel.shared.favourites = favourites
@@ -50,6 +53,7 @@ struct FanCurveApp: App {
 
         let palette = CommandSource(.init(model: model, mic: mic, keyboard: keyboard, displays: displays, calendar: calendar,
                                           snippets: snippets, updater: updater, aero: aero, favourites: favourites, obsidian: obsidian, quickNotes: quickNotes, jiggler: jiggler, autocomplete: autocomplete,
+                                          clipboard: clipboard, quicklinks: quicklinks,
                                           openSettings: { NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil) }))
         let schedule = ScheduleSource(calendar: calendar)
         let snippetSearch = SnippetSource(store: snippets)
@@ -78,6 +82,11 @@ struct FanCurveApp: App {
         }
         shortcuts.autocompleteNow = ShortcutSetting(key: "acNowShortcut", id: 8, default: nil) { autocomplete.suggestNow() }
         shortcuts.draftReply = ShortcutSetting(key: "acDraftShortcut", id: 9, default: .ctrlOpt(kVK_ANSI_R, "R")) { autocomplete.draftReply() }
+        let clipSearch = ClipboardSource(history: clipboard)
+        shortcuts.clipboard = ShortcutSetting(key: "clipShortcut", id: 10, default: .ctrlOpt(kVK_ANSI_V, "V")) {
+            LauncherPanel.shared.toggle(clipSearch)
+        }
+        shortcuts.setUpWindowShortcuts()
         _model = StateObject(wrappedValue: model)
         _keyboard = StateObject(wrappedValue: keyboard)
         _displays = StateObject(wrappedValue: displays)
@@ -93,12 +102,14 @@ struct FanCurveApp: App {
         _quickNotes = StateObject(wrappedValue: quickNotes)
         _jiggler = StateObject(wrappedValue: jiggler)
         _autocomplete = StateObject(wrappedValue: autocomplete)
+        _clipboard = StateObject(wrappedValue: clipboard)
+        _quicklinks = StateObject(wrappedValue: quicklinks)
     }
 
     var body: some Scene {
         MenuBarExtra {
             MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav).environmentObject(updater)
-                .environmentObject(calendar).environmentObject(shortcuts).environmentObject(quickNotes).environmentObject(jiggler).environmentObject(autocomplete)
+                .environmentObject(calendar).environmentObject(shortcuts).environmentObject(quickNotes).environmentObject(jiggler).environmentObject(autocomplete).environmentObject(clipboard).environmentObject(quicklinks)
         } label: {
             MenuBarLabel(nav: nav) {
                 if keyboard.isOn {
@@ -116,7 +127,7 @@ struct FanCurveApp: App {
                 .environmentObject(brightnessKeys).environmentObject(loginItem).environmentObject(updater)
                 .environmentObject(calendar).environmentObject(snippets).environmentObject(shortcuts).environmentObject(aero)
                 .environmentObject(favourites).environmentObject(obsidian).environmentObject(quickNotes)
-                .environmentObject(jiggler).environmentObject(autocomplete)
+                .environmentObject(jiggler).environmentObject(autocomplete).environmentObject(clipboard).environmentObject(quicklinks)
         }
         .defaultSize(width: 760, height: 680)
         .windowToolbarStyle(.unified)
@@ -264,7 +275,7 @@ final class AppNav: ObservableObject {
             case .awake: return ["jiggler", "mouse", "awake", "idle", "sleep", "caffeine", "teams", "slack"]
             case .calendar: return ["meeting", "join", "zoom", "schedule", "agenda", "notification"]
             case .snippets: return ["snippet", "text", "expand", "keyword", "abbreviation"]
-            case .launcher: return ["palette", "launcher", "raycast", "search", "apps", "calculator", "obsidian", "notes", "daily note"]
+            case .launcher: return ["palette", "launcher", "raycast", "search", "apps", "calculator", "obsidian", "notes", "daily note", "clipboard", "quicklinks", "links", "window", "snap", "rectangle"]
             case .fans: return ["curve", "temperature", "profile", "noctua", "rpm", "cooling"]
             case .displays: return ["brightness", "monitor", "ddc", "light sensor", "keys"]
             case .mic: return ["mute", "shortcut", "microphone", "hotkey"]

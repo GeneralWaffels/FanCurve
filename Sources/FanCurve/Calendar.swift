@@ -334,3 +334,139 @@ final class ScheduleSource: PanelSource {
         return items.filtered(query)
     }
 }
+
+// MARK: - Quick add & availability
+
+/// An event parsed from a sentence like "lunch with Sam tomorrow at 1pm for 45 min".
+struct EventDraft: Equatable {
+    var title: String
+    var start: Date
+    var end: Date
+    var allDay: Bool
+}
+
+enum EventParser {
+    private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
+    /// Words that introduce the command rather than belong to the title.
+    static let prefixes = ["create event ", "new event ", "add event ", "event ", "add "]
+
+    /// Returns nil when the text has no date or time in it.
+    static func parse(_ text: String, now: Date = Date()) -> EventDraft? {
+        var s = text.trimmingCharacters(in: .whitespaces)
+        for p in prefixes where s.lowercased().hasPrefix(p) { s = String(s.dropFirst(p.count)); break }
+        let ns = s as NSString
+        guard let m = detector?.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)), var start = m.date else { return nil }
+        let matched = ns.substring(with: m.range).lowercased()
+        var title = ns.replacingCharacters(in: m.range, with: " ")
+
+        // "for 45 min", "for 1.5 hours", "for 2h"
+        var duration = m.duration > 0 ? m.duration : 3600
+        let durRe = try! NSRegularExpression(pattern: #"\bfor\s+(\d+(?:[.,]\d+)?)\s*(h|hr|hrs|hour|hours|m|min|mins|minute|minutes)\b"#, options: .caseInsensitive)
+        if let d = durRe.firstMatch(in: title, range: NSRange(location: 0, length: (title as NSString).length)) {
+            let n = Double((title as NSString).substring(with: d.range(at: 1)).replacingOccurrences(of: ",", with: ".")) ?? 1
+            duration = (title as NSString).substring(with: d.range(at: 2)).lowercased().hasPrefix("h") ? n * 3600 : n * 60
+            title = (title as NSString).replacingCharacters(in: d.range, with: " ")
+        }
+
+        // A date without a time ("3 october", "friday") is an all-day event.
+        let timed = matched.range(of: #"\d{1,2}(:\d{2})?\s*(am|pm)|\d{1,2}[:.]\d{2}|\bnoon\b|\bmidnight\b|\d{1,2}\s*-\s*\d"#,
+                                  options: .regularExpression) != nil
+        let cal = Calendar.current
+        var end: Date
+        if timed {
+            end = start.addingTimeInterval(duration)
+        } else {
+            start = cal.startOfDay(for: start)
+            let last = cal.startOfDay(for: start.addingTimeInterval(max(m.duration, 0)))
+            end = cal.date(byAdding: .day, value: 1, to: last)!
+        }
+        // Tidy leftover joining words: "lunch with Sam  at " → "lunch with Sam".
+        let words = title.split(whereSeparator: \.isWhitespace).map(String.init)
+        var trimmed = words
+        let joiners: Set<String> = ["at", "on", "from", "to", "by", "in", "for", "-", "–"]
+        while let l = trimmed.last, joiners.contains(l.lowercased()) { trimmed.removeLast() }
+        while let f = trimmed.first, joiners.contains(f.lowercased()) { trimmed.removeFirst() }
+        var t = trimmed.joined(separator: " ")
+        if t.isEmpty { t = "New Event" }
+        t = t.prefix(1).uppercased() + t.dropFirst()
+        if end <= start { end = start.addingTimeInterval(3600) }
+        return EventDraft(title: t, start: start, end: end, allDay: !timed)
+    }
+
+    static func describe(_ d: EventDraft) -> String {
+        let f = DateFormatter()
+        f.doesRelativeDateFormatting = true
+        f.dateStyle = .medium
+        if d.allDay {
+            f.timeStyle = .none
+            let days = Calendar.current.dateComponents([.day], from: d.start, to: d.end).day ?? 1
+            return f.string(from: d.start) + (days > 1 ? " · \(days) days" : " · all day")
+        }
+        f.timeStyle = .short
+        let t = DateFormatter(); t.timeStyle = .short; t.dateStyle = .none
+        let mins = Int(d.end.timeIntervalSince(d.start) / 60)
+        return "\(f.string(from: d.start))–\(t.string(from: d.end)) · " + (mins % 60 == 0 ? "\(mins / 60) h" : "\(mins) min")
+    }
+
+    /// Free periods of at least `minMinutes` between `startHour` and `endHour` on `day`, avoiding `busy`.
+    static func freeSlots(busy: [(start: Date, end: Date)], day: Date, startHour: Int, endHour: Int, now: Date,
+                          minMinutes: Int = 30) -> [(start: Date, end: Date)] {
+        let cal = Calendar.current
+        guard var cursor = cal.date(bySettingHour: startHour, minute: 0, second: 0, of: day),
+              let close = cal.date(bySettingHour: endHour, minute: 0, second: 0, of: day) else { return [] }
+        if now > cursor {   // today: start from the next half hour
+            let comps = cal.dateComponents([.hour, .minute], from: now)
+            let rounded = cal.date(bySettingHour: comps.hour!, minute: 0, second: 0, of: now)!
+                .addingTimeInterval(comps.minute! == 0 ? 0 : comps.minute! <= 30 ? 1800 : 3600)
+            cursor = max(cursor, rounded)
+        }
+        var out: [(Date, Date)] = []
+        for b in busy.filter({ $0.end > cursor && $0.start < close }).sorted(by: { $0.start < $1.start }) {
+            if b.start.timeIntervalSince(cursor) >= Double(minMinutes * 60) { out.append((cursor, min(b.start, close))) }
+            cursor = max(cursor, b.end)
+            if cursor >= close { break }
+        }
+        if close.timeIntervalSince(cursor) >= Double(minMinutes * 60) { out.append((cursor, close)) }
+        return out
+    }
+}
+
+extension CalendarStore {
+    /// Adds an event to the default calendar. Returns an error message on failure.
+    func create(_ d: EventDraft) -> String? {
+        guard hasAccess else { requestAccess(); return "FanCurve needs calendar access" }
+        guard let calendar = store.defaultCalendarForNewEvents else { return "There's no calendar to add events to" }
+        let e = EKEvent(eventStore: store)
+        e.title = d.title; e.startDate = d.start; e.endDate = d.end; e.isAllDay = d.allDay; e.calendar = calendar
+        do { try store.save(e, span: .thisEvent); reload(); return nil } catch { return error.localizedDescription }
+    }
+
+    var defaultCalendarName: String? { hasAccess ? store.defaultCalendarForNewEvents?.title : nil }
+
+    /// Your free time over the next few working days, as text to paste into an email or chat.
+    func availabilityText(days: Int = 3) -> String {
+        guard hasAccess else { return "" }
+        let cal = Calendar.current, now = Date()
+        let visible = calendars.filter { !hiddenCalendars.contains($0.calendarIdentifier) }
+        var lines: [String] = [], day = cal.startOfDay(for: now), found = 0
+        let dayF = DateFormatter(); dayF.setLocalizedDateFormatFromTemplate("EEE d MMM")
+        let timeF = DateFormatter(); timeF.timeStyle = .short; timeF.dateStyle = .none
+        while found < days, lines.count < 14 {
+            defer { day = cal.date(byAdding: .day, value: 1, to: day)! }
+            if cal.isDateInWeekend(day) { continue }
+            found += 1
+            let end = cal.date(byAdding: .day, value: 1, to: day)!
+            let busy = visible.isEmpty ? [] : store.events(matching: store.predicateForEvents(withStart: day, end: end, calendars: visible))
+                .filter { !$0.isAllDay && $0.availability != .free && $0.status != .canceled
+                    && $0.attendees?.first(where: { $0.isCurrentUser })?.participantStatus != .declined }
+                .map { (start: $0.startDate!, end: $0.endDate!) }
+            let free = EventParser.freeSlots(busy: busy, day: day, startHour: workStart, endHour: workEnd, now: now)
+            guard !free.isEmpty else { continue }
+            lines.append("\(dayF.string(from: day)): " + free.map { "\(timeF.string(from: $0.start))–\(timeF.string(from: $0.end))" }.joined(separator: ", "))
+        }
+        return lines.isEmpty ? "" : "I'm free:\n" + lines.joined(separator: "\n")
+    }
+
+    var workStart: Int { UserDefaults.standard.object(forKey: "calWorkStart") as? Int ?? 9 }
+    var workEnd: Int { UserDefaults.standard.object(forKey: "calWorkEnd") as? Int ?? 17 }
+}

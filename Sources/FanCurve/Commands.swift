@@ -21,6 +21,8 @@ final class CommandSource: PanelSource {
         let quickNotes: QuickNotes
         let jiggler: MouseJiggler
         let autocomplete: Autocomplete
+        let clipboard: ClipboardHistory
+        let quicklinks: Quicklinks
         let openSettings: () -> Void
     }
 
@@ -51,7 +53,11 @@ final class CommandSource: PanelSource {
             })
         }
 
-        var commands = fanCommands() + meetingCommands() + utilityCommands() + obsidianCommands() + aeroCommands() + systemCommands()
+        // "lunch with Sam tomorrow at 1pm" → a ready-to-create event.
+        if let draft = quickAdd(query) { out.append(draft) }
+
+        var commands = fanCommands() + meetingCommands() + utilityCommands() + obsidianCommands() + aeroCommands()
+            + windowCommands() + d.quicklinks.items(for: query) + systemCommands()
         let favs = d.favourites
         let favItems = favs.apps.enumerated().map { i, app in
             PanelItem(id: "fav:" + app.path, section: "Favourites", title: app.name, subtitle: nil,
@@ -69,7 +75,7 @@ final class CommandSource: PanelSource {
 
         if query.trimmingCharacters(in: .whitespaces).isEmpty {
             // Empty query: favourites, then suggestions, like Raycast's root search.
-            commands = Array(meetingCommands().prefix(3)) + fanCommands().prefix(2) + utilityCommands().prefix(4) + aeroCommands().prefix(1)
+            commands = Array(meetingCommands().prefix(3)) + fanCommands().prefix(2) + utilityCommands().prefix(5) + aeroCommands().prefix(1)
             return out + favItems + commands.map { var i = $0; i.section = "Suggestions"; return i }
         }
         commands = favItems + commands + appItems
@@ -127,7 +133,43 @@ final class CommandSource: PanelSource {
                                symbol: "calendar", tint: .red, keywords: ["schedule", "calendar", "agenda", "today", "meetings"]) {
             LauncherPanel.shared.show(ScheduleSource(calendar: cal)); return true
         })
+        if cal.hasAccess {
+            items.append(PanelItem(id: "meet.avail", section: "Calendar", title: "Copy My Availability",
+                                   subtitle: "Free times over the next 3 working days, \(cal.workStart):00–\(cal.workEnd):00",
+                                   symbol: "calendar.badge.clock", tint: .red,
+                                   keywords: ["availability", "free", "slots", "when", "available", "calendar"]) {
+                let text = cal.availabilityText()
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text.isEmpty ? "No free time in the next 3 working days." : text, forType: .string)
+                return true
+            })
+            items.append(PanelItem(id: "meet.new", section: "Calendar", title: "Create Event",
+                                   subtitle: "Type it naturally: “event lunch with Sam tomorrow at 1pm for 45 min”",
+                                   symbol: "calendar.badge.plus", tint: .red, keywords: ["event", "new", "add", "create", "calendar"]) {
+                DispatchQueue.main.async { LauncherPanel.shared.model.query = "event " }
+                return false
+            })
+        }
         return items
+    }
+
+    private func quickAdd(_ query: String) -> PanelItem? {
+        let cal = d.calendar
+        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        guard cal.hasAccess, EventParser.prefixes.contains(where: { q.hasPrefix($0) }), let e = EventParser.parse(query) else { return nil }
+        return PanelItem(id: "meet.quickadd", section: "Create Event", title: e.title,
+                         subtitle: EventParser.describe(e) + (cal.defaultCalendarName.map { " · \($0)" } ?? ""),
+                         accessory: "Add to Calendar", symbol: "calendar.badge.plus", tint: .red) {
+            if let error = cal.create(e) {
+                let a = NSAlert(); a.messageText = "Couldn't add the event"; a.informativeText = error; a.runModal()
+                return true
+            }
+            NSSound(named: "Glass")?.play()
+            if Calendar.current.isDateInToday(e.start) || Calendar.current.isDateInTomorrow(e.start) {
+                LauncherPanel.shared.show(ScheduleSource(calendar: cal))
+            }
+            return true
+        }
     }
 
     private func utilityCommands() -> [PanelItem] {
@@ -139,6 +181,11 @@ final class CommandSource: PanelSource {
             PanelItem(id: "qn.open", section: "FanCurve", title: "Quick Notes", subtitle: "Open the notes window",
                       accessory: "⌃⌥N", symbol: "note.text", tint: .yellow,
                       keywords: ["note", "notes", "quick", "scratch", "jot", "raycast notes"]) { [d] in d.quickNotes.showWindow(); return true },
+            PanelItem(id: "clip", section: "FanCurve", title: "Clipboard History", subtitle: "Search and paste things you copied",
+                      accessory: "⌃⌥V", symbol: "doc.on.clipboard", tint: .blue,
+                      keywords: ["clipboard", "history", "copy", "paste", "pasteboard"]) { [d] in
+                LauncherPanel.shared.show(ClipboardSource(history: d.clipboard)); return true
+            },
             PanelItem(id: "qn.search", section: "FanCurve", title: "Search Quick Notes", symbol: "doc.text.magnifyingglass", tint: .yellow,
                       keywords: ["note", "notes", "search"]) { [d] in LauncherPanel.shared.show(QuickNotesSource(store: d.quickNotes)); return true },
             PanelItem(id: "snippets", section: "FanCurve", title: "Search Snippets", symbol: "text.quote", tint: .orange,
@@ -201,6 +248,19 @@ final class CommandSource: PanelSource {
             LauncherPanel.shared.show(AeroSpaceSource(aero: aero)); return true
         }
         return [open] + AeroSpaceSource.items(aero, includeWindows: false)
+    }
+
+    /// Window snapping for the app that was in front (halves, thirds, quarters…).
+    private func windowCommands() -> [PanelItem] {
+        let tiled = d.aero.running
+        return WindowSnap.actions.map { a in
+            PanelItem(id: "win." + a.id, section: "Window", title: a.title,
+                      subtitle: tiled ? "AeroSpace may re-tile it; float the window first" : nil,
+                      symbol: a.symbol, tint: .purple, keywords: ["window", "snap", "move", "resize", "rectangle"]) {
+                LauncherPanel.shared.returnToPreviousApp { WindowSnap.run(a.id) }
+                return true
+            }
+        }
     }
 
     private func systemCommands() -> [PanelItem] {
