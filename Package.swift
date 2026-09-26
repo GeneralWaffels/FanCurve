@@ -21,5 +21,6 @@ let package = Package(
             name: "FanCurve", dependencies: ["SMCKit"],
             linkerSettings: [.unsafeFlags(["-Xlinker", "-platform_version", "-Xlinker", "macos", "-Xlinker", "14.0", "-Xlinker", sdkVersion])]
         ),
+        .testTarget(name: "FanCurveTests", dependencies: ["FanCurve", "SMCKit"]),
     ]
 )

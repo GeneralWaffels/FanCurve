@@ -22,11 +22,11 @@ enum WindowSnap {
         Action(id: "max", title: "Maximise", symbol: "rectangle.fill", rect: CGRect(x: 0, y: 0, width: 1, height: 1)),
         Action(id: "almost", title: "Almost Maximise", symbol: "rectangle.inset.filled", rect: CGRect(x: 0.05, y: 0.05, width: 0.9, height: 0.9)),
         Action(id: "centre", title: "Centre", symbol: "rectangle.center.inset.filled", rect: nil),
-        Action(id: "third1", title: "First Third", symbol: "rectangle.leadingthird.inset.filled", rect: CGRect(x: 0, y: 0, width: 1 / 3, height: 1)),
-        Action(id: "third2", title: "Centre Third", symbol: "rectangle.center.inset.filled", rect: CGRect(x: 1 / 3, y: 0, width: 1 / 3, height: 1)),
-        Action(id: "third3", title: "Last Third", symbol: "rectangle.trailingthird.inset.filled", rect: CGRect(x: 2 / 3, y: 0, width: 1 / 3, height: 1)),
-        Action(id: "twothirds1", title: "First Two Thirds", symbol: "rectangle.leadinghalf.inset.filled", rect: CGRect(x: 0, y: 0, width: 2 / 3, height: 1)),
-        Action(id: "twothirds2", title: "Last Two Thirds", symbol: "rectangle.trailinghalf.inset.filled", rect: CGRect(x: 1 / 3, y: 0, width: 2 / 3, height: 1)),
+        Action(id: "third1", title: "First Third", symbol: "rectangle.leadingthird.inset.filled", rect: CGRect(x: 0, y: 0, width: 1.0 / 3, height: 1)),
+        Action(id: "third2", title: "Centre Third", symbol: "rectangle.center.inset.filled", rect: CGRect(x: 1.0 / 3, y: 0, width: 1.0 / 3, height: 1)),
+        Action(id: "third3", title: "Last Third", symbol: "rectangle.trailingthird.inset.filled", rect: CGRect(x: 2.0 / 3, y: 0, width: 1.0 / 3, height: 1)),
+        Action(id: "twothirds1", title: "First Two Thirds", symbol: "rectangle.leadinghalf.inset.filled", rect: CGRect(x: 0, y: 0, width: 2.0 / 3, height: 1)),
+        Action(id: "twothirds2", title: "Last Two Thirds", symbol: "rectangle.trailinghalf.inset.filled", rect: CGRect(x: 1.0 / 3, y: 0, width: 2.0 / 3, height: 1)),
         Action(id: "q1", title: "Top Left Quarter", symbol: "rectangle.inset.topleft.filled", rect: CGRect(x: 0, y: 0, width: 0.5, height: 0.5)),
         Action(id: "q2", title: "Top Right Quarter", symbol: "rectangle.inset.topright.filled", rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 0.5)),
         Action(id: "q3", title: "Bottom Left Quarter", symbol: "rectangle.inset.bottomleft.filled", rect: CGRect(x: 0, y: 0.5, width: 0.5, height: 0.5)),
@@ -40,8 +40,8 @@ enum WindowSnap {
             let size = CGSize(width: min(current.width, visible.width), height: min(current.height, visible.height))
             return CGRect(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2, width: size.width, height: size.height)
         }
-        return CGRect(x: visible.minX + r.minX * visible.width, y: visible.minY + r.minY * visible.height,
-                      width: r.width * visible.width, height: r.height * visible.height).integral
+        return CGRect(x: (visible.minX + r.minX * visible.width).rounded(), y: (visible.minY + r.minY * visible.height).rounded(),
+                      width: (r.width * visible.width).rounded(), height: (r.height * visible.height).rounded())
     }
 
     /// Applies an action to the focused window of the frontmost app (or `app`).

@@ -492,6 +492,8 @@ struct GeneralPage: View {
                        ? "FanCurve installs the latest GitHub release of this repository. Private forks need a fine-grained token with read-only access to Contents (github.com → Settings → Developer settings → Fine-grained tokens), kept in your Keychain; public repositories don't. Installing asks for your administrator password because the fan service is updated too."
                        : "Paste the address that ./serve.sh on prints on the Mac you build FanCurve on. Installing asks for your administrator password because the fan service is updated too.")
             }
+
+            DiagnosticsSection()
         }
         .formStyle(.grouped)
         .onAppear { loginItem.refresh() }
