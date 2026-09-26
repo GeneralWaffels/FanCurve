@@ -71,6 +71,12 @@ struct PanelItem: Identifiable {
 protocol PanelSource: AnyObject {
     var placeholder: String { get }
     func items(for query: String) -> [PanelItem]
+    /// Called each time the panel opens with this source (e.g. to refresh live data).
+    func willShow()
+}
+
+extension PanelSource {
+    func willShow() {}
 }
 
 @MainActor
@@ -116,6 +122,7 @@ final class LauncherPanel: NSObject, NSWindowDelegate {
 
     func show(_ source: PanelSource) {
         if !isVisible { previousApp = NSWorkspace.shared.frontmostApplication }
+        source.willShow()
         model.source = source
         let panel = self.panel ?? make()
         self.panel = panel

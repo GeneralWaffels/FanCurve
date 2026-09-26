@@ -33,14 +33,15 @@ struct FanCurveApp: App {
     @StateObject private var calendar: CalendarStore
     @StateObject private var snippets: SnippetStore
     @StateObject private var shortcuts: AppShortcuts
+    @StateObject private var aero: AeroSpace
 
     init() {
         let model = Model(), keyboard = KeyboardBlocker(), displays = Displays(), mic = MicMuter()
-        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore()
+        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace()
         calendar.onJoin = { [weak mic] in mic?.setMuted(true) }
 
         let palette = CommandSource(.init(model: model, mic: mic, keyboard: keyboard, displays: displays, calendar: calendar,
-                                          snippets: snippets, updater: updater,
+                                          snippets: snippets, updater: updater, aero: aero,
                                           openSettings: { NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil) }))
         let schedule = ScheduleSource(calendar: calendar)
         let snippetSearch = SnippetSource(store: snippets)
@@ -69,6 +70,7 @@ struct FanCurveApp: App {
         _calendar = StateObject(wrappedValue: calendar)
         _snippets = StateObject(wrappedValue: snippets)
         _shortcuts = StateObject(wrappedValue: shortcuts)
+        _aero = StateObject(wrappedValue: aero)
     }
 
     var body: some Scene {
@@ -90,7 +92,7 @@ struct FanCurveApp: App {
             SettingsView()
                 .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
                 .environmentObject(brightnessKeys).environmentObject(loginItem).environmentObject(updater)
-                .environmentObject(calendar).environmentObject(snippets).environmentObject(shortcuts)
+                .environmentObject(calendar).environmentObject(snippets).environmentObject(shortcuts).environmentObject(aero)
         }
         .defaultSize(width: 760, height: 680)
         .windowToolbarStyle(.unified)

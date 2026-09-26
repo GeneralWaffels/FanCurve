@@ -231,6 +231,7 @@ private struct SnippetEditor: View {
 
 struct LauncherPage: View {
     @EnvironmentObject var shortcuts: AppShortcuts
+    @EnvironmentObject var aero: AeroSpace
 
     var body: some View {
         Form {
@@ -253,6 +254,31 @@ struct LauncherPage: View {
                 feature("equal", .orange, "Calculator", "Type 23*1.21 and press Return to copy the answer.")
                 feature("mic.fill", .red, "Microphone & Displays", "Mute, set external brightness, clean the keyboard.")
                 feature("moon.fill", .indigo, "System", "Lock, sleep, screen saver and dark mode.")
+                if aero.installed {
+                    feature("rectangle.3.group", .teal, "AeroSpace", "Toggle tiling, layouts, workspaces, windows and AeroSpace settings.")
+                }
+            }
+
+            if aero.installed {
+                Section {
+                    LabeledContent("Status") {
+                        StatusRow(text: aero.running ? "Running\(aero.version.map { " · \($0)" } ?? "")" : "Not running",
+                                  color: aero.running ? .green : .secondary)
+                            .fixedSize()
+                    }
+                    LabeledContent("Gap size for \"Turn On Window Gaps\"") {
+                        Stepper("\(aero.gapSize) pt", value: $aero.gapSize, in: 2...40, step: 2)
+                    }
+                    LabeledContent("Config file") {
+                        Button("Open \(aero.configURL.lastPathComponent)") { aero.openConfig() }
+                    }
+                    if let e = aero.lastError { StatusRow(text: e, color: .red) }
+                } header: {
+                    Text("AeroSpace")
+                } footer: {
+                    Footer("Type \"aerospace\" or a workspace name in the palette. Settings commands edit \(aero.configURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) and reload AeroSpace; a backup is saved next to it (.fancurve-backup) before the first change.")
+                }
+                .onAppear { aero.refresh() }
             }
         }
         .formStyle(.grouped)

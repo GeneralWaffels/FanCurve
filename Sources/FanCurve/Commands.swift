@@ -15,6 +15,7 @@ final class CommandSource: PanelSource {
         let calendar: CalendarStore
         let snippets: SnippetStore
         let updater: Updater
+        let aero: AeroSpace
         let openSettings: () -> Void
     }
 
@@ -25,6 +26,11 @@ final class CommandSource: PanelSource {
     init(_ deps: Deps) { d = deps }
 
     var placeholder: String { "Search for apps and commands…" }
+
+    func willShow() {
+        // Fresh workspace/window list each time; rows update in place when it arrives.
+        if d.aero.installed { d.aero.refresh { LauncherPanel.shared.model.reload() } }
+    }
 
     func items(for query: String) -> [PanelItem] {
         scanAppsIfNeeded()
@@ -39,7 +45,7 @@ final class CommandSource: PanelSource {
             })
         }
 
-        var commands = fanCommands() + meetingCommands() + utilityCommands() + systemCommands()
+        var commands = fanCommands() + meetingCommands() + utilityCommands() + aeroCommands() + systemCommands()
         let appItems = apps.map { app in
             PanelItem(id: "app:" + app.url.path, section: "Applications", title: app.name, subtitle: nil, accessory: "Application",
                       image: NSWorkspace.shared.icon(forFile: app.url.path)) {
@@ -49,7 +55,7 @@ final class CommandSource: PanelSource {
 
         if query.trimmingCharacters(in: .whitespaces).isEmpty {
             // Empty query: suggestions first, like Raycast's root search.
-            commands = Array(meetingCommands().prefix(3)) + fanCommands().prefix(2) + utilityCommands().prefix(4)
+            commands = Array(meetingCommands().prefix(3)) + fanCommands().prefix(2) + utilityCommands().prefix(4) + aeroCommands().prefix(1)
             return out + commands.map { var i = $0; i.section = "Suggestions"; return i }
         }
         commands += appItems
@@ -125,6 +131,19 @@ final class CommandSource: PanelSource {
                                    symbol: "arrow.down.circle.fill", tint: .blue, keywords: ["update"]) { [d] in d.updater.install(); return true }, at: 0)
         }
         return items
+    }
+
+    /// AeroSpace entry point plus its commands/settings/workspaces (windows only in its own view).
+    private func aeroCommands() -> [PanelItem] {
+        let aero = d.aero
+        guard aero.installed else { return [] }
+        let open = PanelItem(id: "aero.open", section: "AeroSpace", title: "AeroSpace",
+                             subtitle: aero.running ? "Workspaces, windows, layouts and settings" : "Not running",
+                             accessory: aero.focusedWorkspace.map { "Workspace \($0)" }, symbol: "rectangle.3.group", tint: .teal,
+                             keywords: ["aerospace", "tiling", "window manager", "workspace"]) {
+            LauncherPanel.shared.show(AeroSpaceSource(aero: aero)); return true
+        }
+        return [open] + AeroSpaceSource.items(aero, includeWindows: false)
     }
 
     private func systemCommands() -> [PanelItem] {
