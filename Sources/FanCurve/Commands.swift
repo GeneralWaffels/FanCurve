@@ -17,6 +17,7 @@ final class CommandSource: PanelSource {
         let updater: Updater
         let aero: AeroSpace
         let favourites: Favourites
+        let obsidian: Obsidian
         let openSettings: () -> Void
     }
 
@@ -31,6 +32,7 @@ final class CommandSource: PanelSource {
     func willShow() {
         // Fresh workspace/window list each time; rows update in place when it arrives.
         if d.aero.installed { d.aero.refresh { LauncherPanel.shared.model.reload() } }
+        if d.obsidian.installed { d.obsidian.reindex() }
     }
 
     func items(for query: String) -> [PanelItem] {
@@ -46,7 +48,7 @@ final class CommandSource: PanelSource {
             })
         }
 
-        var commands = fanCommands() + meetingCommands() + utilityCommands() + aeroCommands() + systemCommands()
+        var commands = fanCommands() + meetingCommands() + utilityCommands() + obsidianCommands() + aeroCommands() + systemCommands()
         let favs = d.favourites
         let favItems = favs.apps.enumerated().map { i, app in
             PanelItem(id: "fav:" + app.path, section: "Favourites", title: app.name, subtitle: nil,
@@ -68,6 +70,16 @@ final class CommandSource: PanelSource {
             return out + favItems + commands.map { var i = $0; i.section = "Suggestions"; return i }
         }
         commands = favItems + commands + appItems
+        // Matching Obsidian notes (titles only here; the Obsidian view also searches text).
+        if d.obsidian.installed, query.trimmingCharacters(in: .whitespaces).count >= 2 {
+            let obs = d.obsidian
+            let notes = obs.search(query, limit: 30).filter { $0.snippet == nil }.prefix(5).map { r in
+                PanelItem(id: "obs.root." + r.note.rel, section: "Obsidian Notes", title: r.note.title,
+                          subtitle: r.note.folder.isEmpty ? obs.vault?.name : r.note.folder, accessory: "Note",
+                          image: obs.appIcon) { obs.open(r.note); return true }
+            }
+            return out + commands.filtered(query) + notes
+        }
         return out + commands.filtered(query)
     }
 
@@ -140,6 +152,17 @@ final class CommandSource: PanelSource {
                                    symbol: "arrow.down.circle.fill", tint: .blue, keywords: ["update"]) { [d] in d.updater.install(); return true }, at: 0)
         }
         return items
+    }
+
+    private func obsidianCommands() -> [PanelItem] {
+        let obs = d.obsidian
+        guard obs.installed, obs.vault != nil else { return [] }
+        let open = PanelItem(id: "obs.open", section: "Obsidian", title: "Obsidian",
+                             subtitle: "Search notes, capture to your daily note, create notes", accessory: obs.vault?.name,
+                             image: obs.appIcon, keywords: ["obsidian", "notes", "vault", "search notes"]) {
+            LauncherPanel.shared.show(ObsidianSource(obs: obs)); return true
+        }
+        return [open] + ObsidianSource.actions(obs)
     }
 
     /// AeroSpace entry point plus its commands/settings/workspaces (windows only in its own view).

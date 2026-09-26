@@ -35,16 +35,17 @@ struct FanCurveApp: App {
     @StateObject private var shortcuts: AppShortcuts
     @StateObject private var aero: AeroSpace
     @StateObject private var favourites: Favourites
+    @StateObject private var obsidian: Obsidian
 
     init() {
         let model = Model(), keyboard = KeyboardBlocker(), displays = Displays(), mic = MicMuter()
-        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites()
+        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites(), obsidian = Obsidian()
         favourites.aero = aero
         LauncherPanel.shared.favourites = favourites
         calendar.onJoin = { [weak mic] in mic?.setMuted(true) }
 
         let palette = CommandSource(.init(model: model, mic: mic, keyboard: keyboard, displays: displays, calendar: calendar,
-                                          snippets: snippets, updater: updater, aero: aero, favourites: favourites,
+                                          snippets: snippets, updater: updater, aero: aero, favourites: favourites, obsidian: obsidian,
                                           openSettings: { NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil) }))
         let schedule = ScheduleSource(calendar: calendar)
         let snippetSearch = SnippetSource(store: snippets)
@@ -75,6 +76,7 @@ struct FanCurveApp: App {
         _shortcuts = StateObject(wrappedValue: shortcuts)
         _aero = StateObject(wrappedValue: aero)
         _favourites = StateObject(wrappedValue: favourites)
+        _obsidian = StateObject(wrappedValue: obsidian)
     }
 
     var body: some Scene {
@@ -97,7 +99,7 @@ struct FanCurveApp: App {
                 .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
                 .environmentObject(brightnessKeys).environmentObject(loginItem).environmentObject(updater)
                 .environmentObject(calendar).environmentObject(snippets).environmentObject(shortcuts).environmentObject(aero)
-                .environmentObject(favourites)
+                .environmentObject(favourites).environmentObject(obsidian)
         }
         .defaultSize(width: 760, height: 680)
         .windowToolbarStyle(.unified)
@@ -231,7 +233,7 @@ final class AppNav: ObservableObject {
             case .general: return ["login", "startup", "update", "version"]
             case .calendar: return ["meeting", "join", "zoom", "schedule", "agenda", "notification"]
             case .snippets: return ["snippet", "text", "expand", "keyword", "abbreviation"]
-            case .launcher: return ["palette", "launcher", "raycast", "search", "apps", "calculator"]
+            case .launcher: return ["palette", "launcher", "raycast", "search", "apps", "calculator", "obsidian", "notes", "daily note"]
             case .fans: return ["curve", "temperature", "profile", "noctua", "rpm", "cooling"]
             case .displays: return ["brightness", "monitor", "ddc", "light sensor", "keys"]
             case .mic: return ["mute", "shortcut", "microphone", "hotkey"]

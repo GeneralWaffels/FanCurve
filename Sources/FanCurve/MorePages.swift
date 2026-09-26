@@ -227,6 +227,7 @@ private struct SnippetEditor: View {
 struct LauncherPage: View {
     @EnvironmentObject var shortcuts: AppShortcuts
     @EnvironmentObject var aero: AeroSpace
+    @EnvironmentObject var obsidian: Obsidian
 
     var body: some View {
         Form {
@@ -253,10 +254,15 @@ struct LauncherPage: View {
                 feature("equal", .orange, "Calculator", "Type 23*1.21 and press Return to copy the answer.")
                 feature("mic.fill", .red, "Microphone & Displays", "Mute, set external brightness, clean the keyboard.")
                 feature("moon.fill", .indigo, "System", "Lock, sleep, screen saver and dark mode.")
+                if obsidian.installed {
+                    feature("books.vertical.fill", .purple, "Obsidian", "Search notes, capture to your daily note, create notes.")
+                }
                 if aero.installed {
                     feature("rectangle.3.group", .teal, "AeroSpace", "Toggle tiling, layouts, workspaces, windows and AeroSpace settings.")
                 }
             }
+
+            if obsidian.installed { ObsidianSection() }
 
             if aero.installed {
                 Section {

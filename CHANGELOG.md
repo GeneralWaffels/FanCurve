@@ -5,6 +5,9 @@ FanCurve uses date-based versions (`YYYY.MM.DD.HHMM`). See [Releases](../../rele
 ## 2026-09-26
 
 ### Added
+- **Obsidian integration** in the command palette: note search (titles and text), append to the daily note (the layout is detected from your notes), create notes, open the daily note, open the vault, and open a random note.
+- **⌘Space option** to replace Spotlight's shortcut.
+- **Rename fan profiles**; the Save, Rename and Delete buttons now sit above the curve.
 - **Command palette (⌥Space):** fuzzy search over apps, FanCurve commands, meetings and snippets, plus a calculator and system commands.
 - **Favourites:** pinned apps first in the palette; ⌘1–9 in the palette, global ⌃⌥1–9, and ⌘F to pin the selected app.
 - **AeroSpace integration:** live window-manager commands, workspace and window navigation, and config toggles.

@@ -66,6 +66,10 @@ A Raycast-style glass search panel:
 - **Calculator:** type `23*1.21`, and pressing Return copies the answer.
 - **FanCurve commands:** turn the fan curve on or off, switch profiles, mute the mic, set external brightness, keyboard cleaning mode.
 - **System commands:** lock screen, sleep, screen saver, toggle dark mode.
+- **[Obsidian](https://obsidian.md) integration**, like Raycast's Obsidian extension:
+  - **Search notes** by title or by text, with a snippet showing the match.
+  - **Capture to your daily note:** type a thought and choose *Append to Daily Note*. It works with any daily-note layout, which FanCurve detects from your existing notes.
+  - **Create notes**, open today's daily note, open your vault, or open a random note.
 - **[AeroSpace](https://github.com/nikitabobko/AeroSpace) integration** (optional, when AeroSpace is installed):
   - **Tiling and layouts:** toggle tiling, change layout, float, fullscreen, balance.
   - **Workspaces:** jump to one (each is listed with the apps in it), or move the focused window there.
