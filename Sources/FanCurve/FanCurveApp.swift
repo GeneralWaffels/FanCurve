@@ -77,6 +77,7 @@ struct FanCurveApp: App {
             if autocomplete.enabled { autocomplete.paused.toggle() } else { autocomplete.enabled = true }
         }
         shortcuts.autocompleteNow = ShortcutSetting(key: "acNowShortcut", id: 8, default: nil) { autocomplete.suggestNow() }
+        shortcuts.draftReply = ShortcutSetting(key: "acDraftShortcut", id: 9, default: .ctrlOpt(kVK_ANSI_R, "R")) { autocomplete.draftReply() }
         _model = StateObject(wrappedValue: model)
         _keyboard = StateObject(wrappedValue: keyboard)
         _displays = StateObject(wrappedValue: displays)

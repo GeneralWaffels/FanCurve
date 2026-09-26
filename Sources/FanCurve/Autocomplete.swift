@@ -19,7 +19,7 @@ final class Autocomplete: ObservableObject {
 
     // MARK: settings
     @Published var enabled: Bool { didSet { save(); enabled ? start() : stop() } }
-    @Published var paused = false { didSet { if paused { hide() } } }
+    @Published var paused = false { didSet { if paused { hide() }; updateWordCounter() } }
     @Published var style: String { didSet { save() } }
     @Published var useScreenContext: Bool { didSet { save() } }
     @Published var learn: Bool { didSet { save() } }
@@ -56,6 +56,10 @@ final class Autocomplete: ObservableObject {
     @Published var acceptKey: AcceptKey { didSet { save() } }
     @Published var emoji: Bool { didSet { save() } }
     @Published var autocorrect: Bool { didSet { save() } }
+    /// Writing style per app (bundle id → style), used instead of the main style in that app.
+    @Published var appStyles: [String: String] { didSet { save() } }
+    /// Shows today's completed-word count in the menu bar.
+    @Published var menuBarWords: Bool { didSet { save(); updateWordCounter() } }
 
     // MARK: state
     @Published private(set) var engine: EngineState = .off
@@ -76,11 +80,19 @@ final class Autocomplete: ObservableObject {
     var modelsFolder: URL { folder.appendingPathComponent("Models") }
     private let defaults = UserDefaults.standard
     private var server: Process?
+    private var stopping = false
+    private var healthTimer: Timer?
+    private var failedChecks = 0
+    private var crashes: [Date] = []
     private let port = 18765
     nonisolated(unsafe) private var tap: CFMachPort?
     private var tapSource: CFRunLoopSource?
     private var debounce: Task<Void, Never>?
-    private var request: URLSessionDataTask?
+    private var stream: Task<Void, Never>?
+    /// The last accepted suggestion, so Esc straight afterwards can undo it.
+    private struct LastAccept { let typed: String; let removed: String; let at: Date }
+    private var lastAccept: LastAccept?
+    private var wordItem: NSStatusItem?
     private var suggestion: Suggestion?
     private var buffer = ""
     private var bufferPID: pid_t = 0
@@ -114,6 +126,8 @@ final class Autocomplete: ObservableObject {
         wordsTotal = defaults.integer(forKey: "acWordsTotal")
         wordsToday = defaults.string(forKey: "acWordsDay") == Self.dayKey() ? defaults.integer(forKey: "acWordsToday") : 0
         seenApps = defaults.dictionary(forKey: "acSeenApps") as? [String: String] ?? [:]
+        appStyles = defaults.dictionary(forKey: "acAppStyles") as? [String: String] ?? [:]
+        menuBarWords = defaults.bool(forKey: "acMenuBarWords")
         try? FileManager.default.createDirectory(at: folder.appendingPathComponent("Models"), withIntermediateDirectories: true)
         loadHistory()
         loadVocabulary()
@@ -122,6 +136,7 @@ final class Autocomplete: ObservableObject {
             MainActor.assumeIsolated { self?.server?.terminate() }
         }
         watchPower()
+        updateWordCounter()
         if enabled { start() }
     }
 
@@ -138,6 +153,8 @@ final class Autocomplete: ObservableObject {
         defaults.set(acceptKey.rawValue, forKey: "acAcceptKey")
         defaults.set(emoji, forKey: "acEmoji")
         defaults.set(autocorrect, forKey: "acAutocorrect")
+        defaults.set(appStyles, forKey: "acAppStyles")
+        defaults.set(menuBarWords, forKey: "acMenuBarWords")
     }
 
     // MARK: models & engine
@@ -169,11 +186,13 @@ final class Autocomplete: ObservableObject {
         installTap()
         onBattery = Self.isOnBattery
         applyEngineForPower()
+        watchHealth()
         updateScreenLearning()
     }
 
     private func stop() {
         screenTimer?.invalidate(); screenTimer = nil
+        healthTimer?.invalidate(); healthTimer = nil
         removeTap()
         hide()
         stopServer()
@@ -183,7 +202,9 @@ final class Autocomplete: ObservableObject {
     }
 
     func restartServer() {
+        stopping = true
         server?.terminate(); server = nil
+        stopping = false
         guard let bin = serverPath else { engine = .notInstalled; return }
         let model = modelsFolder.appendingPathComponent(modelFile)
         guard !modelFile.isEmpty, FileManager.default.fileExists(atPath: model.path) else { engine = .noModel; return }
@@ -197,6 +218,9 @@ final class Autocomplete: ObservableObject {
                            "-c", "4096", "--no-webui", "--parallel", "1"]
             p.standardOutput = FileHandle.nullDevice
             p.standardError = FileHandle.nullDevice
+            p.terminationHandler = { proc in   // Autocomplete lives as long as the app
+                Task { @MainActor in self.serverExited(proc) }
+            }
             do { try p.run() } catch { engine = .failed(error.localizedDescription); return }
             server = p
             for _ in 0..<120 {
@@ -206,6 +230,43 @@ final class Autocomplete: ObservableObject {
             }
             engine = .failed("The model took too long to load.")
         }
+    }
+
+    /// Restarts llama-server if it crashes (not when FanCurve stopped it), backing off if it keeps failing.
+    private func serverExited(_ p: Process) {
+        guard p === server, !stopping, enabled, !paused, !usingApple else { return }
+        server = nil
+        let now = Date()
+        crashes = crashes.filter { now.timeIntervalSince($0) < 600 } + [now]
+        guard crashes.count <= 5 else {
+            engine = .failed("The model server keeps stopping. Try another model file.")
+            setStatus("The model server crashed 5 times in 10 minutes, so it's off for now")
+            return
+        }
+        engine = .starting
+        setStatus("The model server stopped; restarting it")
+        let delay = Double(crashes.count * crashes.count)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.enabled, !self.paused, !self.usingApple, self.server == nil else { return }
+            self.restartServer()
+        }
+    }
+
+    /// Every 30 s, checks the server still answers (it may be one reused from a previous launch, which
+    /// FanCurve doesn't get exit notifications for) and restarts it after two failed checks.
+    private func watchHealth() {
+        healthTimer?.invalidate()
+        healthTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.enabled, !self.paused, !self.usingApple, self.engine == .ready else { return }
+                Task {
+                    if await self.health() { self.failedChecks = 0; return }
+                    self.failedChecks += 1
+                    if self.failedChecks >= 2 { self.failedChecks = 0; self.setStatus("The model server stopped answering; restarting it"); self.stopServer(); self.restartServer() }
+                }
+            }
+        }
+        healthTimer?.tolerance = 10
     }
 
     private func health() async -> Bool {
@@ -270,7 +331,9 @@ final class Autocomplete: ObservableObject {
 
     /// Stops llama-server, including one left running by a previous launch, to save power and memory.
     private func stopServer() {
+        stopping = true
         server?.terminate(); server = nil
+        stopping = false
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
         p.arguments = ["-f", "llama-server.*--port \(port)"]
@@ -323,7 +386,7 @@ final class Autocomplete: ObservableObject {
 
     /// Returns true to swallow the event (only the accept / dismiss keys while a suggestion is showing).
     private func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
-        guard type == .keyDown else { buffer = ""; hide(); return false }   // a click moves the caret
+        guard type == .keyDown else { buffer = ""; lastAccept = nil; hide(); return false }   // a click moves the caret
         if event.getIntegerValueField(.eventSourceUserData) == Paster.marker { return false }
         let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let flags = event.flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
@@ -334,6 +397,10 @@ final class Autocomplete: ObservableObject {
             if s.kind == .completion && code == kVK_RightArrow && flags == .maskAlternate { accept(s, wordOnly: true); return true }
             if code == kVK_Escape && flags.isEmpty { hide(); setStatus("Dismissed"); return true }
         }
+        if code == kVK_Escape, flags.isEmpty, suggestion == nil, let u = lastAccept, Date().timeIntervalSince(u.at) < 5 {
+            undo(u); return true
+        }
+        lastAccept = nil
         hide()
         track(event, code: code, flags: flags)
         guard enabled, !paused, engine == .ready else { return false }
@@ -372,7 +439,7 @@ final class Autocomplete: ObservableObject {
 
     private func scheduleSuggestion(force: Bool) {
         debounce?.cancel()
-        request?.cancel()
+        stream?.cancel()
         // Emoji codes are local and instant; model suggestions wait for a short pause in typing.
         let quick = emoji && (buffer.last.map { $0.isLetter } ?? false) && buffer.split(separator: " ").last?.hasPrefix(":") == true
         debounce = Task {
@@ -401,11 +468,16 @@ final class Autocomplete: ObservableObject {
         let placement: GhostText.Placement
         let fromBuffer: Bool
         let app: String
+        let bundle: String
         let window: String?
         let screen: String?
     }
 
-    private func focusedContext(includeScreen: Bool = true, force: Bool = false) -> Context? {
+    /// - Parameters:
+    ///   - allowEmpty: also works in an empty field (for reply drafts).
+    ///   - screenLimit: always include this much visible text, even if "Use what's on screen" is off.
+    private func focusedContext(includeScreen: Bool = true, force: Bool = false, allowEmpty: Bool = false,
+                                screenLimit: Int? = nil) -> Context? {
         guard !IsSecureEventInputEnabled() else { setStatus("Paused: you're in a password field"); return nil }
         guard let front = NSWorkspace.shared.frontmostApplication else { return nil }
         let bundle = front.bundleIdentifier ?? "", name = front.localizedName ?? "this app"
@@ -443,11 +515,15 @@ final class Autocomplete: ObservableObject {
             prefix = buffer
             fromBuffer = true
         }
-        guard let p = prefix, p.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
+        if prefix == nil, allowEmpty {
+            prefix = ""
+            fromBuffer = el.flatMap { copy($0, kAXValueAttribute) as String? } == nil
+        }
+        guard let p = prefix, allowEmpty || p.trimmingCharacters(in: .whitespacesAndNewlines).count >= 3 else {
             setStatus("Type a few words in \(name) to get suggestions")
             return nil
         }
-        if !force, p.last?.isNewline == true { return nil }
+        if !force, !allowEmpty, p.last?.isNewline == true { return nil }
 
         // Where to show it: at the cursor, under a small field, or as a bubble at the bottom of the window.
         let appEl = AXUIElementCreateApplication(front.processIdentifier)
@@ -464,9 +540,11 @@ final class Autocomplete: ObservableObject {
         guard let a = anchor else { setStatus("\(name) doesn't say where its text is, so there's nowhere to show suggestions"); return nil }
 
         let title: String? = windowEl.flatMap { copy($0, kAXTitleAttribute) }
-        let screen = useScreenContext && includeScreen ? windowEl.map { visibleText($0, excluding: value ?? p) } : nil
+        let screen: String?
+        if let screenLimit { screen = windowEl.map { visibleText($0, excluding: value ?? p, limit: screenLimit) } }
+        else { screen = useScreenContext && includeScreen ? windowEl.map { visibleText($0, excluding: value ?? p) } : nil }
         return Context(element: el, value: value, caret: caret, prefix: String(p.suffix(1500)), anchor: a, placement: placement,
-                       fromBuffer: fromBuffer, app: name, window: title, screen: screen)
+                       fromBuffer: fromBuffer, app: name, bundle: bundle, window: title, screen: screen)
     }
 
     private func copy<T>(_ el: AXUIElement, _ attr: String) -> T? {
@@ -520,7 +598,7 @@ final class Autocomplete: ObservableObject {
     // MARK: suggestions
 
     private struct Suggestion {
-        enum Kind { case completion, emoji, correction }
+        enum Kind { case completion, emoji, correction, draft }
         let kind: Kind
         let insert: String      // text to type
         let display: String     // what the ghost shows
@@ -533,18 +611,77 @@ final class Autocomplete: ObservableObject {
         if emoji, let s = emojiSuggestion(ctx) { present(s); return }
         if autocorrect, let s = correctionSuggestion(ctx) { present(s); return }
 
-        let prompt = buildPrompt(prefix: ctx.prefix, app: ctx.app, window: ctx.window, screen: ctx.screen)
+        let prompt = buildPrompt(prefix: ctx.prefix, app: ctx.app, bundle: ctx.bundle, window: ctx.window, screen: ctx.screen)
         let started = Date()
-        complete(prompt: prompt, tokens: length.tokens) { [weak self] text, hitLimit in
-            guard let self else { return }
-            self.lastLatency = Int(Date().timeIntervalSince(started) * 1000)
-            guard var t = text else { self.setStatus("The model didn't answer: is it still loading?"); return }
-            if hitLimit, let space = t.lastIndex(of: " ") { t = String(t[..<space]) }   // drop a cut-off last word
-            if ctx.prefix.last?.isWhitespace == true { t = String(t.drop { $0 == " " }) }
-            t = t.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .newlines)
-            guard t.trimmingCharacters(in: .whitespaces).count >= 2 else { self.setStatus("No suggestion for that (\(self.lastLatency ?? 0) ms)"); return }
-            guard self.stillCurrent(ctx) else { return }   // the user kept typing
+        var checked = false
+        // Words appear as the model produces them; the last, possibly unfinished word waits for the next one.
+        let partial: (String) -> Void = { [weak self] raw in
+            guard let self, let space = raw.lastIndex(of: " "), let t = Self.tidy(String(raw[..<space]), after: ctx.prefix) else { return }
+            if !checked { guard self.stillCurrent(ctx) else { self.stream?.cancel(); return }; checked = true }
+            if self.lastLatency == nil || self.suggestion == nil { self.lastLatency = Int(Date().timeIntervalSince(started) * 1000) }
             self.present(Suggestion(kind: .completion, insert: t, display: t, replace: 0, ctx: ctx))
+        }
+        complete(prompt: prompt, tokens: length.tokens, partial: partial) { [weak self] text, hitLimit in
+            guard let self else { return }
+            guard var raw = text else { self.setStatus("The model didn't answer: is it still loading?"); return }
+            if hitLimit, let space = raw.lastIndex(of: " ") { raw = String(raw[..<space]) }   // drop a cut-off last word
+            guard let t = Self.tidy(raw, after: ctx.prefix) else {
+                if self.suggestion == nil { self.setStatus("No suggestion for that") }
+                return
+            }
+            guard checked || self.stillCurrent(ctx) else { return }   // the user kept typing
+            if self.suggestion == nil { self.lastLatency = Int(Date().timeIntervalSince(started) * 1000) }
+            self.present(Suggestion(kind: .completion, insert: t, display: t, replace: 0, ctx: ctx))
+        }
+    }
+
+    /// Cleans up model output for showing after `prefix`; nil if there's nothing worth suggesting.
+    static func tidy(_ raw: String, after prefix: String) -> String? {
+        var t = raw
+        if prefix.last?.isWhitespace == true || prefix.isEmpty { t = String(t.drop { $0 == " " }) }
+        t = t.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .newlines)
+        return t.trimmingCharacters(in: .whitespaces).count >= 2 ? t : nil
+    }
+
+    // MARK: reply drafts
+
+    /// "Draft a reply" shortcut: writes a reply to what's on screen (an email, a chat) in your style,
+    /// shown in a bubble; Tab inserts it.
+    func draftReply() {
+        guard enabled, !paused, engine == .ready else { NSSound.beep(); return }
+        hide()
+        debounce?.cancel()
+        guard var ctx = focusedContext(force: true, allowEmpty: true, screenLimit: 4000) else { NSSound.beep(); return }
+        guard let screen = ctx.screen, screen.count > 20 else { setStatus("There's nothing on screen to reply to"); NSSound.beep(); return }
+        if ctx.placement == .inline {
+            let a = ctx.anchor
+            ctx = Context(element: ctx.element, value: ctx.value, caret: ctx.caret, prefix: ctx.prefix,
+                          anchor: CGRect(x: a.minX, y: a.maxY + 4, width: 1, height: 18), placement: .below,
+                          fromBuffer: ctx.fromBuffer, app: ctx.app, bundle: ctx.bundle, window: ctx.window, screen: screen)
+        }
+        var p = "Below is what's on screen in \(ctx.app)"
+        if let w = ctx.window, !w.isEmpty { p += " (window: \"\(w.prefix(80))\")" }
+        p += ":\n\(screen)\n\nWriting style of the person replying: \(styleFor(ctx.bundle))\n"
+        let examples = similarHistory(to: screen)
+        if !examples.isEmpty { p += "Examples of how they phrase things:\n" + examples.map { "- \($0)" }.joined(separator: "\n") + "\n" }
+        p += "Write their reply to the most recent message above: short, natural, in their voice, no subject line.\n---\n"
+        let prompt = p + "Reply:\n" + ctx.prefix
+        setStatus("Drafting a reply…")
+        ghost.show("Drafting a reply…", hint: "", at: ctx.anchor, placement: ctx.placement, multiline: true)
+        let show: (String, Bool) -> Void = { [weak self] raw, final in
+            guard let self else { return }
+            var t = raw.trimmingCharacters(in: final ? .whitespacesAndNewlines : .newlines)
+            if ctx.prefix.isEmpty || ctx.prefix.last?.isWhitespace == true { t = String(t.drop { $0 == " " }) }
+            guard !t.isEmpty else { return }
+            self.present(Suggestion(kind: .draft, insert: t, display: t, replace: 0, ctx: ctx))
+        }
+        complete(prompt: prompt, tokens: 160, stop: ["---", "\n\n\n"], temperature: 0.5, draft: true,
+                 partial: { show($0, false) }) { [weak self] text, _ in
+            guard let self else { return }
+            guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                self.ghost.hide(); self.setStatus("Couldn't draft a reply"); return
+            }
+            show(text, true)
         }
     }
 
@@ -561,17 +698,24 @@ final class Autocomplete: ObservableObject {
         case .completion: hint = acceptKey == .tab ? "⇥" : "→"
         case .emoji: hint = acceptKey == .tab ? "⇥ emoji" : "→ emoji"
         case .correction: hint = acceptKey == .tab ? "⇥ fix" : "→ fix"
+        case .draft: hint = acceptKey == .tab ? "⇥ insert · esc" : "→ insert · esc"
         }
-        ghost.show(s.display, hint: hint, at: s.ctx.anchor, placement: s.ctx.placement)
+        ghost.show(s.display, hint: hint, at: s.ctx.anchor, placement: s.ctx.placement, multiline: s.kind == .draft)
         let how = s.ctx.fromBuffer ? " (from your typing)" : ""
         setStatus("Suggested in \(s.ctx.app)\(how)" + (s.kind == .completion ? " · \(lastLatency ?? 0) ms" : ""))
     }
 
-    func buildPrompt(prefix: String, app: String, window: String?, screen: String?) -> String {
+    /// The style for an app: its own one if set, otherwise the main style.
+    func styleFor(_ bundle: String) -> String {
+        let own = appStyles[bundle]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return own.isEmpty ? style.trimmingCharacters(in: .whitespacesAndNewlines) : own
+    }
+
+    func buildPrompt(prefix: String, app: String, bundle: String = "", window: String?, screen: String?) -> String {
         var p = "Below is text being typed on a Mac in \(app)"
         if let w = window, !w.isEmpty { p += " (window: \"\(w.prefix(80))\")" }
         p += ". Continue it naturally with the next few words, in the writer's own voice.\n"
-        p += "Writing style: \(style.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+        p += "Writing style: \(styleFor(bundle))\n"
         if let s = screen, !s.isEmpty { p += "Also visible on screen: \(s)\n" }
         let terms = relevantTerms(for: prefix)
         if !terms.isEmpty { p += "Names and terms the writer often sees and uses: \(terms.joined(separator: ", "))\n" }
@@ -580,35 +724,59 @@ final class Autocomplete: ObservableObject {
         return p + "---\n" + prefix
     }
 
-    private func complete(prompt: String, tokens: Int, done: @escaping (String?, Bool) -> Void) {
-        request?.cancel()
-        if usingApple { appleComplete(prompt: prompt, tokens: tokens, done: done); return }
+    /// Asks the model for a continuation. `partial` gets the text so far as it streams in; `done` gets
+    /// the whole text and whether it stopped at the token limit.
+    private func complete(prompt: String, tokens: Int, stop: [String] = ["\n", "---"], temperature: Double = 0.2,
+                          draft: Bool = false, partial: ((String) -> Void)? = nil,
+                          done: @escaping (String?, Bool) -> Void) {
+        stream?.cancel()
+        if usingApple { appleComplete(prompt: prompt, tokens: tokens, draft: draft, done: done); return }
         guard let url = URL(string: "http://127.0.0.1:\(port)/completion") else { return }
         var r = URLRequest(url: url)
         r.httpMethod = "POST"
-        r.timeoutInterval = 4
+        r.timeoutInterval = draft ? 20 : 4
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = ["prompt": prompt, "n_predict": tokens, "temperature": 0.2, "top_k": 20, "top_p": 0.9,
-                                   "stop": ["\n", "---"], "cache_prompt": true]
+        let body: [String: Any] = ["prompt": prompt, "n_predict": tokens, "temperature": temperature, "top_k": 20, "top_p": 0.9,
+                                   "stop": stop, "cache_prompt": true, "stream": true]
         r.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        let task = URLSession.shared.dataTask(with: r) { data, _, _ in
-            let json = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-            let text = json?["content"] as? String
-            let limit = (json?["stop_type"] as? String) == "limit"
-            DispatchQueue.main.async { done(text, limit) }
+        stream = Task {
+            var text = "", limit = false
+            do {
+                let (bytes, _) = try await URLSession.shared.bytes(for: r)
+                for try await line in bytes.lines {
+                    guard !Task.isCancelled else { return }
+                    guard line.hasPrefix("data: "),
+                          let j = try? JSONSerialization.jsonObject(with: Data(line.utf8.dropFirst(6))) as? [String: Any] else { continue }
+                    if let c = j["content"] as? String, !c.isEmpty { text += c; partial?(text) }
+                    if j["stop"] as? Bool == true { limit = (j["stop_type"] as? String) == "limit"; break }
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                done(text.isEmpty ? nil : text, false); return
+            }
+            guard !Task.isCancelled else { return }
+            done(text, limit)
         }
-        request = task
-        task.resume()
     }
 
     /// Apple's on-device model is chat-tuned, so it's asked to fill a blank (▮) rather than to "continue",
     /// which stops it replying to the text instead of completing it.
-    private func appleComplete(prompt: String, tokens: Int, done: @escaping (String?, Bool) -> Void) {
+    private func appleComplete(prompt: String, tokens: Int, draft: Bool, done: @escaping (String?, Bool) -> Void) {
         appleTask?.cancel()
         #if canImport(FoundationModels)
         guard #available(macOS 26.0, *) else { done(nil, false); return }
         let parts = prompt.components(separatedBy: "---\n")
         let context = parts.first ?? "", text = parts.dropFirst().joined(separator: "---\n")
+        if draft {
+            appleTask = Task {
+                let session = LanguageModelSession(instructions: context)
+                let r = try? await session.respond(to: "Write only the reply text.\n" + text,
+                                                   options: GenerationOptions(temperature: 0.5, maximumResponseTokens: tokens))
+                guard !Task.isCancelled else { return }
+                done(r?.content, false)
+            }
+            return
+        }
         let instructions = """
         You complete unfinished text, like a phone keyboard's predictive text. The user's text is cut off at ▮. \
         Output only the words that belong at ▮ to continue it: 1 to \(max(tokens / 2, 4)) words, lowercase unless a name \
@@ -736,12 +904,18 @@ final class Autocomplete: ObservableObject {
             text = String(chars[..<i]); rest = String(chars[i...])
         }
         insert(text, replacing: s.replace, ctx: s.ctx)
+        let removed = String(s.ctx.prefix.suffix(s.replace))
+        if s.replace == 0, let prev = lastAccept {   // ⌥→ word by word: undo takes back all of it
+            lastAccept = LastAccept(typed: prev.typed + text, removed: prev.removed, at: Date())
+        } else {
+            lastAccept = LastAccept(typed: text, removed: removed, at: Date())
+        }
         if s.ctx.fromBuffer || s.ctx.element == nil {
             if s.replace > 0 { buffer.removeLast(min(s.replace, buffer.count)) }
             buffer += text
         }
         hide()
-        if s.kind == .completion { countWords(text) }
+        if s.kind == .completion || s.kind == .draft { countWords(text) }
         if !rest.trimmingCharacters(in: .whitespaces).isEmpty {
             // Offer the rest of the suggestion straight away.
             let caret = s.ctx.caret + (text as NSString).length
@@ -749,13 +923,30 @@ final class Autocomplete: ObservableObject {
             if s.ctx.placement == .inline, let el = s.ctx.element, let r = caretRect(el, caret) { anchor = r }
             let value: String? = s.ctx.element.flatMap { copy($0, kAXValueAttribute) }
             let ctx = Context(element: s.ctx.element, value: value, caret: caret, prefix: s.ctx.prefix + text, anchor: anchor,
-                              placement: s.ctx.placement, fromBuffer: s.ctx.fromBuffer, app: s.ctx.app, window: s.ctx.window, screen: nil)
+                              placement: s.ctx.placement, fromBuffer: s.ctx.fromBuffer, app: s.ctx.app, bundle: s.ctx.bundle,
+                              window: s.ctx.window, screen: nil)
             present(Suggestion(kind: .completion, insert: rest, display: rest, replace: 0, ctx: ctx))
-        } else if s.kind == .completion {
-            remember(lineEnding: s.ctx.prefix, with: text)
+        } else if s.kind == .completion || s.kind == .draft {
+            if s.kind == .completion { remember(lineEnding: s.ctx.prefix, with: text) }
             accepted += 1; defaults.set(accepted, forKey: "acAccepted")
-            setStatus("Accepted in \(s.ctx.app)")
+            setStatus("Accepted in \(s.ctx.app) · Esc to undo")
         }
+    }
+
+    /// Esc right after accepting: removes what was inserted and puts back anything it replaced.
+    private func undo(_ u: LastAccept) {
+        lastAccept = nil
+        for _ in 0..<u.typed.count { Paster.key(kVK_Delete) }
+        if !u.removed.isEmpty { Self.type(u.removed) }
+        if !buffer.isEmpty {
+            buffer.removeLast(min(u.typed.count, buffer.count))
+            buffer += u.removed
+        }
+        let n = u.typed.split(whereSeparator: { $0.isWhitespace }).count
+        wordsToday = max(wordsToday - n, 0); wordsTotal = max(wordsTotal - n, 0)
+        defaults.set(wordsToday, forKey: "acWordsToday"); defaults.set(wordsTotal, forKey: "acWordsTotal")
+        updateWordCounter()
+        setStatus("Undone")
     }
 
     /// Inserts at the cursor, first replacing `replacing` characters before it. Accessibility first
@@ -776,7 +967,7 @@ final class Autocomplete: ObservableObject {
             if selected && n > 0 { Self.type(text); return }   // typing replaces the selected characters
         }
         for _ in 0..<n { Paster.key(kVK_Delete) }
-        Self.type(text)
+        if text.contains("\n") { Paster.paste(text) } else { Self.type(text) }   // typed Returns could send a chat message
     }
 
     /// Types text as keyboard events (works in browsers and Electron apps too), marked as ours.
@@ -798,6 +989,8 @@ final class Autocomplete: ObservableObject {
 
     func hide() {
         suggestion = nil
+        stream?.cancel()
+        appleTask?.cancel()
         ghost.hide()
     }
 
@@ -812,6 +1005,32 @@ final class Autocomplete: ObservableObject {
         if defaults.string(forKey: "acWordsDay") != today { wordsToday = 0; defaults.set(today, forKey: "acWordsDay") }
         wordsToday += n; wordsTotal += n
         defaults.set(wordsToday, forKey: "acWordsToday"); defaults.set(wordsTotal, forKey: "acWordsTotal")
+        updateWordCounter()
+    }
+
+    // MARK: menu bar word counter
+
+    private func updateWordCounter() {
+        guard menuBarWords else {
+            if let wordItem { NSStatusBar.system.removeStatusItem(wordItem) }
+            wordItem = nil
+            return
+        }
+        let item = wordItem ?? NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        wordItem = item
+        if defaults.string(forKey: "acWordsDay") != Self.dayKey() { wordsToday = 0 }
+        item.button?.image = NSImage(systemSymbolName: paused ? "text.cursor" : "sparkles", accessibilityDescription: "Autocomplete")
+        item.button?.imagePosition = .imageLeading
+        item.button?.title = " \(wordsToday)"
+        item.button?.toolTip = "Words completed today: \(wordsToday) (\(wordsTotal) in total)"
+        let menu = NSMenu()
+        menu.addItem(withTitle: "\(wordsToday) words today · \(wordsTotal) in total", action: nil, keyEquivalent: "")
+        menu.addItem(.separator())
+        let pause = menu.addItem(withTitle: paused ? "Resume Autocomplete" : "Pause Autocomplete",
+                                 action: #selector(WordMenuTarget.toggle), keyEquivalent: "")
+        pause.target = WordMenuTarget.shared
+        WordMenuTarget.shared.action = { [weak self] in self?.paused.toggle() }
+        item.menu = menu
     }
 
     private static func dayKey() -> String { Date().formatted(.iso8601.year().month().day()) }
@@ -984,6 +1203,14 @@ final class Autocomplete: ObservableObject {
 }
 
 
+/// Target for the word counter's menu item.
+@MainActor
+final class WordMenuTarget: NSObject {
+    static let shared = WordMenuTarget()
+    var action: (() -> Void)?
+    @objc func toggle() { action?() }
+}
+
 // MARK: - Ghost text overlay
 
 /// A click-through, non-activating panel that shows the suggestion: inline in grey right after the
@@ -997,7 +1224,7 @@ final class GhostText {
     private let label = NSTextField(labelWithString: "")
     private let bubble = NSVisualEffectView()
 
-    func show(_ text: String, hint: String, at anchor: CGRect, placement: Placement) {
+    func show(_ text: String, hint: String, at anchor: CGRect, placement: Placement, multiline: Bool = false) {
         let p = panel ?? make()
         panel = p
         let inline = placement == .inline
@@ -1006,14 +1233,17 @@ final class GhostText {
             .font: NSFont.systemFont(ofSize: size),
             .foregroundColor: inline ? NSColor.secondaryLabelColor.withAlphaComponent(0.75) : NSColor.labelColor,
         ])
-        attr.append(NSAttributedString(string: "  " + hint, attributes: [
+        attr.append(NSAttributedString(string: (multiline ? "\n" : "  ") + hint, attributes: [
             .font: NSFont.systemFont(ofSize: size * 0.72, weight: .medium), .foregroundColor: NSColor.tertiaryLabelColor,
         ]))
         label.attributedStringValue = attr
-        label.sizeToFit()
+        label.maximumNumberOfLines = multiline ? 14 : 1
+        label.lineBreakMode = multiline ? .byWordWrapping : .byTruncatingTail
+        let maxWidth: CGFloat = multiline ? 480 : 720
+        let fit = label.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: maxWidth, height: 4000)) ?? label.intrinsicContentSize
         bubble.isHidden = inline
         let padX: CGFloat = inline ? 2 : 10, padY: CGFloat = inline ? 0 : 6
-        let size2 = NSSize(width: min(label.frame.width, 720) + padX * 2, height: label.frame.height + padY * 2)
+        let size2 = NSSize(width: min(ceil(fit.width), maxWidth) + padX * 2, height: ceil(fit.height) + padY * 2)
         // AX uses a top-left origin on the primary display; AppKit uses bottom-left.
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         var origin: NSPoint
@@ -1025,9 +1255,15 @@ final class GhostText {
         case .centred:
             origin = NSPoint(x: anchor.midX - size2.width / 2, y: primaryHeight - anchor.minY - size2.height)
         }
+        // Keep a bubble on screen (a long draft under a field near the bottom would otherwise run off it).
+        if !inline, let screen = NSScreen.screens.first(where: { $0.frame.contains(NSPoint(x: anchor.midX, y: primaryHeight - anchor.midY)) }) {
+            let v = screen.visibleFrame
+            origin.x = min(max(origin.x, v.minX + 8), v.maxX - size2.width - 8)
+            if origin.y < v.minY + 8 { origin.y = primaryHeight - anchor.minY + 26 }   // flip above the anchor
+        }
         p.setFrame(NSRect(origin: origin, size: size2), display: true)
         bubble.frame = NSRect(origin: .zero, size: size2)
-        label.frame = NSRect(x: padX, y: padY, width: size2.width - padX * 2, height: label.frame.height)
+        label.frame = NSRect(x: padX, y: padY, width: size2.width - padX * 2, height: size2.height - padY * 2)
         p.orderFrontRegardless()
     }
 

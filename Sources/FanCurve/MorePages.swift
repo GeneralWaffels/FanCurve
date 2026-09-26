@@ -14,6 +14,7 @@ final class AppShortcuts: ObservableObject {
     let quickNotes: ShortcutSetting
     var autocompletePause: ShortcutSetting?
     var autocompleteNow: ShortcutSetting?
+    var draftReply: ShortcutSetting?
     /// AeroSpace layout/width shortcuts, keyed by AeroSpace.shortcutActions id.
     var layouts: [String: ShortcutSetting] = [:]
 
@@ -289,13 +290,15 @@ struct AutocompletePage: View {
                 }
                 if let s = shortcuts.autocompletePause { ShortcutRow(title: "Pause or resume", setting: s) }
                 if let s = shortcuts.autocompleteNow { ShortcutRow(title: "Suggest now", setting: s) }
+                if let s = shortcuts.draftReply { ShortcutRow(title: "Draft a reply", setting: s) }
                 LabeledContent("Words completed") {
                     Text("\(ac.wordsToday) today · \(ac.wordsTotal) in total").monospacedDigit().foregroundStyle(.secondary)
                 }
+                Toggle("Show words completed in the menu bar", isOn: $ac.menuBarWords)
             } header: {
                 Text("Suggestions")
             } footer: {
-                Footer("On battery, Apple's built-in model saves power and memory: FanCurve stops the larger model until you plug in again. Suggest now asks for a suggestion straight away, even in the middle of a line.")
+                Footer("Suggestions stream in word by word. Press Esc straight after accepting one to undo it. Draft a reply writes an answer to the email or chat on screen, in your style. On battery, Apple's built-in model saves power and memory: FanCurve stops the larger model until you plug in again.")
             }
 
             Section {
@@ -333,6 +336,33 @@ struct AutocompletePage: View {
                 Text("Your Writing Style")
             } footer: {
                 Footer("Tell the model who you are and how you write, for example your name, language, spelling and tone.")
+            }
+
+            Section {
+                ForEach(ac.appStyles.keys.sorted { appName($0).localizedCaseInsensitiveCompare(appName($1)) == .orderedAscending }, id: \.self) { id in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            appIcon(id)
+                            Text(appName(id))
+                            Spacer()
+                            Button { ac.appStyles[id] = nil } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.secondary) }
+                                .buttonStyle(.borderless).help("Use the main style in \(appName(id))")
+                        }
+                        TextField("Style in \(appName(id))", text: Binding(get: { ac.appStyles[id] ?? "" }, set: { ac.appStyles[id] = $0 }),
+                                  prompt: Text("For example: casual, short, lowercase"), axis: .vertical)
+                            .lineLimit(2...5)
+                    }
+                }
+                let candidates = ac.seenApps.keys.filter { ac.appStyles[$0] == nil }
+                    .sorted { appName($0).localizedCaseInsensitiveCompare(appName($1)) == .orderedAscending }
+                Menu {
+                    ForEach(candidates, id: \.self) { id in Button(appName(id)) { ac.appStyles[id] = "" } }
+                } label: { Label("Add a Style for an App", systemImage: "plus") }
+                    .menuStyle(.borderlessButton).fixedSize().disabled(candidates.isEmpty)
+            } header: {
+                Text("Styles per App")
+            } footer: {
+                Footer("Write differently in different places, for example casual in Messages and formal in Mail. Apps without their own style use the one above.")
             }
 
             Section {
@@ -381,9 +411,7 @@ struct AutocompletePage: View {
                 ForEach(apps, id: \.self) { id in
                     Toggle(isOn: Binding(get: { !ac.excludedApps.contains(id) }, set: { ac.setApp(id, enabled: $0) })) {
                         HStack(spacing: 8) {
-                            if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
-                                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 18, height: 18)
-                            }
+                            appIcon(id)
                             Text(appName(id))
                         }
                     }
@@ -407,6 +435,12 @@ struct AutocompletePage: View {
         case .ready:
             StatusRow(text: ac.usingApple ? "Ready · Apple on-device model (on battery)" : "Ready · \(ac.modelFile)", color: .green).fixedSize()
         case .failed(let m): StatusRow(text: m, color: .red).fixedSize()
+        }
+    }
+
+    @ViewBuilder private func appIcon(_ id: String) -> some View {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 18, height: 18)
         }
     }
 
