@@ -5,3 +5,4 @@ dist/
 *.xcodeproj/
 .DS_Store
 *.fancurve-backup
+.vscode/
