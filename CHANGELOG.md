@@ -5,6 +5,7 @@ FanCurve uses date-based versions (`YYYY.MM.DD.HHMM`). See [Releases](../../rele
 ## 2026-09-26
 
 ### Added
+- **Mouse jiggler** (Settings → Keep Awake), with an adjustable idle delay and interval. It moves across all monitors and doesn't prevent sleep with the lid closed unless in clamshell mode.
 - **Quick Notes (⌃⌥N):** a floating notes window with a note list. It saves as you type, you can search it from the palette, and you can move a note to Obsidian.
 - **Spotlight file search** in the command palette.
 - **Obsidian integration** in the command palette: note search (titles and text), append to the daily note (the layout is detected from your notes), create notes, open the daily note, open the vault, and open a random note.

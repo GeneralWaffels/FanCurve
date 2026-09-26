@@ -127,6 +127,7 @@ A Raycast-style glass search panel:
 ### And also
 
 - **Global mic mute (⌃⌥M):** mutes every input device at once, including headsets plugged in while muted. An optional menu bar icon shows when you're muted.
+- **Mouse jiggler:** once you've been idle for a while (5 minutes by default), it sweeps the pointer across every monitor at a set interval (every minute by default). This keeps your Mac awake and apps like Teams showing you as active. It stops the moment you're back, and never runs with the lid closed unless you're in clamshell mode.
 - **Keyboard cleaning mode:** ignores every key press while the trackpad keeps working. It switches itself off after 5 minutes.
 - **Open at login**, plus **in-app updates** from GitHub Releases.
 

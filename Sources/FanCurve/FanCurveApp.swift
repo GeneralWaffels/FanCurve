@@ -37,17 +37,18 @@ struct FanCurveApp: App {
     @StateObject private var favourites: Favourites
     @StateObject private var obsidian: Obsidian
     @StateObject private var quickNotes: QuickNotes
+    @StateObject private var jiggler: MouseJiggler
 
     init() {
         let model = Model(), keyboard = KeyboardBlocker(), displays = Displays(), mic = MicMuter()
-        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites(), obsidian = Obsidian(), quickNotes = QuickNotes()
+        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites(), obsidian = Obsidian(), quickNotes = QuickNotes(), jiggler = MouseJiggler()
         quickNotes.obsidian = obsidian
         favourites.aero = aero
         LauncherPanel.shared.favourites = favourites
         calendar.onJoin = { [weak mic] in mic?.setMuted(true) }
 
         let palette = CommandSource(.init(model: model, mic: mic, keyboard: keyboard, displays: displays, calendar: calendar,
-                                          snippets: snippets, updater: updater, aero: aero, favourites: favourites, obsidian: obsidian, quickNotes: quickNotes,
+                                          snippets: snippets, updater: updater, aero: aero, favourites: favourites, obsidian: obsidian, quickNotes: quickNotes, jiggler: jiggler,
                                           openSettings: { NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil) }))
         let schedule = ScheduleSource(calendar: calendar)
         let snippetSearch = SnippetSource(store: snippets)
@@ -83,12 +84,13 @@ struct FanCurveApp: App {
         _favourites = StateObject(wrappedValue: favourites)
         _obsidian = StateObject(wrappedValue: obsidian)
         _quickNotes = StateObject(wrappedValue: quickNotes)
+        _jiggler = StateObject(wrappedValue: jiggler)
     }
 
     var body: some Scene {
         MenuBarExtra {
             MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav).environmentObject(updater)
-                .environmentObject(calendar).environmentObject(shortcuts).environmentObject(quickNotes)
+                .environmentObject(calendar).environmentObject(shortcuts).environmentObject(quickNotes).environmentObject(jiggler)
         } label: {
             MenuBarLabel(nav: nav) {
                 if keyboard.isOn {
@@ -106,6 +108,7 @@ struct FanCurveApp: App {
                 .environmentObject(brightnessKeys).environmentObject(loginItem).environmentObject(updater)
                 .environmentObject(calendar).environmentObject(snippets).environmentObject(shortcuts).environmentObject(aero)
                 .environmentObject(favourites).environmentObject(obsidian).environmentObject(quickNotes)
+                .environmentObject(jiggler)
         }
         .defaultSize(width: 760, height: 680)
         .windowToolbarStyle(.unified)
@@ -156,6 +159,7 @@ struct MenuContent: View {
     @EnvironmentObject var calendar: CalendarStore
     @EnvironmentObject var shortcuts: AppShortcuts
     @EnvironmentObject var quickNotes: QuickNotes
+    @EnvironmentObject var jiggler: MouseJiggler
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -189,6 +193,7 @@ struct MenuContent: View {
         }
         Divider()
         Toggle("Mute microphone\(mic.shortcut.map { "  (\($0.display))" } ?? "")", isOn: Binding(get: { mic.isMuted }, set: { mic.setMuted($0) }))
+        Toggle("Mouse jiggler (after \(Int(jiggler.idleMinutes)) min idle)", isOn: $jiggler.enabled)
         Toggle("Keyboard cleaning mode", isOn: Binding(get: { keyboard.isOn }, set: { _ in keyboard.toggle() }))
         if keyboard.needsPermission {
             Button("Allow Accessibility Access…") { AccessibilityPermission.shared.request() }
@@ -208,12 +213,13 @@ struct MenuContent: View {
 final class AppNav: ObservableObject {
     static let shared = AppNav()
     enum Page: String, CaseIterable, Identifiable {
-        case general, fans, displays, mic, keyboard, calendar, snippets, launcher
-        static let groups: [[Page]] = [[.general], [.fans, .displays, .mic, .keyboard], [.launcher, .calendar, .snippets]]
+        case general, fans, displays, mic, keyboard, awake, calendar, snippets, launcher
+        static let groups: [[Page]] = [[.general], [.fans, .displays, .mic, .keyboard, .awake], [.launcher, .calendar, .snippets]]
         var id: String { rawValue }
         var title: String {
             switch self {
             case .general: return "General"
+            case .awake: return "Keep Awake"
             case .calendar: return "Calendar"
             case .snippets: return "Snippets"
             case .launcher: return "Command Palette"
@@ -226,6 +232,7 @@ final class AppNav: ObservableObject {
         var symbol: String {
             switch self {
             case .general: return "gearshape.fill"
+            case .awake: return "cursorarrow.motionlines"
             case .calendar: return "calendar"
             case .snippets: return "text.quote"
             case .launcher: return "command"
@@ -239,6 +246,7 @@ final class AppNav: ObservableObject {
         var keywords: [String] {
             switch self {
             case .general: return ["login", "startup", "update", "version"]
+            case .awake: return ["jiggler", "mouse", "awake", "idle", "sleep", "caffeine", "teams", "slack"]
             case .calendar: return ["meeting", "join", "zoom", "schedule", "agenda", "notification"]
             case .snippets: return ["snippet", "text", "expand", "keyword", "abbreviation"]
             case .launcher: return ["palette", "launcher", "raycast", "search", "apps", "calculator", "obsidian", "notes", "daily note"]
@@ -251,6 +259,7 @@ final class AppNav: ObservableObject {
         var tint: Color {
             switch self {
             case .general: return .gray
+            case .awake: return .green
             case .calendar: return .red
             case .snippets: return .orange
             case .launcher: return .purple

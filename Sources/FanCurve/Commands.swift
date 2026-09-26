@@ -19,6 +19,7 @@ final class CommandSource: PanelSource {
         let favourites: Favourites
         let obsidian: Obsidian
         let quickNotes: QuickNotes
+        let jiggler: MouseJiggler
         let openSettings: () -> Void
     }
 
@@ -143,6 +144,9 @@ final class CommandSource: PanelSource {
                       keywords: ["snippet", "text", "expand", "paste"]) {
                 LauncherPanel.shared.show(SnippetSource(store: snips)); return true
             },
+            PanelItem(id: "jiggle", section: "FanCurve", title: d.jiggler.enabled ? "Turn Off Mouse Jiggler" : "Turn On Mouse Jiggler",
+                      subtitle: "Keeps the Mac awake after \(Int(d.jiggler.idleMinutes)) min idle", symbol: "cursorarrow.motionlines", tint: .green,
+                      keywords: ["jiggler", "mouse", "awake", "caffeine", "idle", "sleep"]) { [d] in d.jiggler.toggle(); return true },
             PanelItem(id: "clean", section: "FanCurve", title: kb.isOn ? "Stop Keyboard Cleaning" : "Keyboard Cleaning Mode",
                       symbol: "keyboard.fill", tint: .gray, keywords: ["clean", "keyboard", "block"]) { kb.toggle(); return true },
             PanelItem(id: "settings", section: "FanCurve", title: "FanCurve Settings", accessory: "⌘,", symbol: "gearshape.fill", tint: .gray,

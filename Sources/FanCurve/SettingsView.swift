@@ -33,6 +33,7 @@ struct SettingsView: View {
             Group {
                 switch nav.page {
                 case .general: GeneralPage()
+                case .awake: KeepAwakePage()
                 case .calendar: CalendarPage()
                 case .snippets: SnippetsPage()
                 case .launcher: LauncherPage()
@@ -559,6 +560,61 @@ struct MicPage: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+// MARK: - Keep awake
+
+struct KeepAwakePage: View {
+    @EnvironmentObject var jiggler: MouseJiggler
+
+    var body: some View {
+        Form {
+            PageHeader(page: .awake, description: "Keep your Mac awake, and apps showing you as active, by nudging the mouse while you're away.")
+
+            Section {
+                Toggle(isOn: $jiggler.enabled) {
+                    Text("Mouse jiggler")
+                    Text("Moves the pointer across every monitor, then back to where it was.")
+                }
+                if jiggler.enabled { AccessibilityRow(feature: "move the mouse") }
+            } footer: {
+                statusFooter
+            }
+
+            Section {
+                LabeledContent("Start after being idle for") {
+                    HStack {
+                        Slider(value: rounded($jiggler.idleMinutes, to: 1), in: 1...60).frame(width: 180)
+                        Text("\(Int(jiggler.idleMinutes)) min").monospacedDigit().foregroundStyle(.secondary).frame(width: 52, alignment: .trailing)
+                    }
+                }
+                Picker("Move the mouse every", selection: $jiggler.intervalSeconds) {
+                    Text("30 seconds").tag(30.0)
+                    Text("1 minute").tag(60.0)
+                    Text("2 minutes").tag(120.0)
+                    Text("5 minutes").tag(300.0)
+                }
+            } header: {
+                Text("Timing")
+            } footer: {
+                Footer("It stops the moment you use the mouse or keyboard. With the lid closed it never runs, so your Mac sleeps as usual, unless an external display is connected (clamshell mode).")
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder private var statusFooter: some View {
+        switch jiggler.state {
+        case .off: StatusRow(text: "Off.", color: .secondary)
+        case .waiting(let idle):
+            let left = max(0, Int(jiggler.idleMinutes * 60 - idle))
+            StatusRow(text: "Waiting: starts after \(Int(jiggler.idleMinutes)) min without input (\(mmss(left)) to go).", color: .secondary)
+        case .active(let last):
+            StatusRow(text: "Active: last moved \(last.formatted(.relative(presentation: .named))).", color: .green)
+        case .lidClosed: StatusRow(text: "Paused: the lid is closed, so your Mac is allowed to sleep.", color: .orange)
+        case .needsPermission: StatusRow(text: "Waiting for Accessibility access.", color: .orange)
+        }
     }
 }
 
