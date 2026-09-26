@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import SMCKit
 
-/// Profile picker used in the Fans tab and the menu bar: pick, save the current curve, delete.
+/// Profile picker used in the Fans tab and the menu bar. Saving and deleting live on the Fans page.
 struct ProfileMenu: View {
     @EnvironmentObject var model: Model
 
@@ -16,15 +16,6 @@ struct ProfileMenu: View {
                     ForEach(model.customProfileNames, id: \.self) { name in item(name) }
                 }
             }
-            Divider()
-            Button("Save current curve as…") { ProfileDialogs.save(model) }
-            if !model.customProfileNames.isEmpty {
-                Menu("Delete profile") {
-                    ForEach(model.customProfileNames, id: \.self) { name in
-                        Button(name) { ProfileDialogs.delete(name, model) }
-                    }
-                }
-            }
         }
     }
 
@@ -32,6 +23,27 @@ struct ProfileMenu: View {
         Button { model.applyPreset(name) } label: {
             if model.activeProfile == name { Label(name, systemImage: "checkmark") } else { Text(name) }
         }
+    }
+}
+
+/// Save / Delete buttons for the Fans page. Delete removes the selected saved profile; built-in
+/// Noctua presets can't be deleted, so the button is disabled for them.
+struct ProfileButtons: View {
+    @EnvironmentObject var model: Model
+
+    var body: some View {
+        let active = model.activeProfile
+        let deletable = active.map { !model.isBuiltIn($0) } ?? false
+        HStack(spacing: 8) {
+            Button { ProfileDialogs.save(model) } label: { Label("Save as Profile…", systemImage: "square.and.arrow.down") }
+                .help("Save the current curve as a named profile")
+            Button(role: .destructive) { if let a = active { ProfileDialogs.delete(a, model) } } label: {
+                Label("Delete Profile", systemImage: "trash")
+            }
+            .disabled(!deletable)
+            .help(deletable ? "Delete \u{201C}\(active!)\u{201D}" : active == nil ? "Select a saved profile to delete it" : "Built-in profiles can't be deleted")
+        }
+        .labelStyle(.titleAndIcon)
     }
 }
 

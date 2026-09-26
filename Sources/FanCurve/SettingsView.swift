@@ -217,6 +217,11 @@ struct FansPage: View {
                     ForEach(TempSource.allCases) { Text($0.label).tag($0) }
                 }
                 LabeledContent("Profile") { ProfileMenu().fixedSize() }
+                LabeledContent {
+                    ProfileButtons()
+                } label: {
+                    Text(profileHint).foregroundStyle(.secondary).font(.callout)
+                }
             } footer: {
                 daemonFooter
             }
@@ -254,6 +259,11 @@ struct FansPage: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var profileHint: String {
+        guard let a = model.activeProfile else { return "This curve isn't saved yet." }
+        return model.isBuiltIn(a) ? "Built-in profile" : "Saved profile"
     }
 
     private var curveSummary: String {
