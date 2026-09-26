@@ -5,6 +5,29 @@ FanCurve uses date-based versions (`YYYY.MM.DD.HHMM`). See [Releases](../../rele
 ## 2026-09-26
 
 ### Added
+- **Autocomplete improvements:**
+  - Suggestions stream in word by word.
+  - Esc straight after accepting a suggestion undoes it.
+  - Draft a reply (⌃⌥R) writes an answer to the email or chat on screen.
+  - Writing styles can be set per app.
+  - An optional words-completed counter shows in the menu bar.
+  - llama-server restarts itself if it crashes or stops answering.
+- **Clipboard history (⌃⌥V)** in the palette, with pinning (⌘P) and deleting (⌘⌫). Passwords and concealed items are never saved.
+- **Quicklinks:** URL templates with `{query}`, for example `gh fancurve` to search GitHub.
+- **Window snapping** without AeroSpace: halves, thirds, quarters, maximise, centre and next display, from the palette or custom shortcuts.
+- **Calendar:**
+  - Create events from plain English, for example "event lunch with Sam tomorrow at 1pm for 45 min".
+  - Copy My Availability pastes your free times.
+- **Fans:**
+  - A temperature and fan-speed history graph covering the last 10 minutes to 3 hours.
+  - Automatic profiles for battery, charger, calls, or while an app runs.
+- **Battery page:** charge, measured health, cycles, power draw and charger.
+- **Export Diagnostics** (General → Troubleshooting).
+- **Unit tests** (Swift Testing) that run in CI.
+
+### Fixed
+- Window thirds were zero-width. The unit tests caught it before release.
+
 - **Autocomplete now works in more apps:**
   - A typing buffer and a bubble display cover apps that don't expose their text, such as VS Code and Electron apps.
   - New features: emoji completion, autocorrect, a length setting, a choice of accept key, a Suggest now shortcut, per-app switches, word stats, and a live status line.

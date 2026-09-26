@@ -52,6 +52,8 @@ FanCurve is a native macOS menu bar app written in Swift and SwiftUI. Its core i
   - **Hysteresis:** fans stay on until the temperature is 3 °C below where they started, so they don't flick on and off.
   - **Max above a set temperature:** above it (95 °C by default) the fans always run flat out.
   - **Fails safe:** any error, quitting, or turning the curve off hands the fans straight back to macOS.
+- **History graph** of temperature and fan speed for the last 10 minutes to 3 hours.
+- **Automatic profiles:** switch curves on battery, on the charger, during calls, or while an app such as a game or Xcode is running.
 
 ### Command palette (⌥Space)
 
@@ -66,6 +68,10 @@ A Raycast-style glass search panel:
 - **Calculator:** type `23*1.21`, and pressing Return copies the answer.
 - **FanCurve commands:** turn the fan curve on or off, switch profiles, mute the mic, set external brightness, keyboard cleaning mode.
 - **System commands:** lock screen, sleep, screen saver, toggle dark mode.
+- **Clipboard history (⌃⌥V):** search and paste anything you copied; ⌘P pins an item, ⌘⌫ deletes it. Passwords and items marked private are never saved.
+- **Quicklinks:** type `gh fancurve`, `g …`, `yt …` or your own keywords to open a search. Add any URL with `{query}` in it.
+- **Window snapping** without AeroSpace: halves, thirds, quarters, maximise, centre and next display.
+- **Create events by typing:** `event lunch with Sam tomorrow at 1pm for 45 min`. *Copy My Availability* copies your free times over the next three working days.
 - **Quick Notes:** jot something down straight from the palette (see below).
 - **Spotlight file search** inside the palette, useful when ⌘Space belongs to the palette.
 - **[Obsidian](https://obsidian.md) integration**, like Raycast's Obsidian extension:
@@ -127,6 +133,10 @@ A Raycast-style glass search panel:
 - **Personalisation:** your writing-style prompt, plus examples of your own writing (lines you finish and suggestions you accept). Optionally it also learns names and terms that keep appearing on screen, checking every few minutes; it keeps vocabulary only, never whole sentences. All of it is stored locally.
 - **Skipped:** password fields, and any app you exclude.
 - **Works everywhere:** in apps that don't expose their text (VS Code, some browsers and Electron apps), FanCurve tracks what you type itself and shows the suggestion in a small bubble.
+- **Streaming and undo:** suggestions appear word by word, and Esc straight after accepting one takes it back.
+- **Draft a reply (⌃⌥R):** writes an answer to the email or chat on screen in your style; Tab inserts it.
+- **Styles per app:** for example casual in Messages, formal in Mail.
+- **Self-healing:** if llama-server crashes or stops answering, FanCurve restarts it.
 - **Also included:** emoji completion (`:smile` → 😄), autocorrect for misspelt words, short, medium or long suggestions, a choice of Tab or → to accept, a *Suggest now* shortcut, per-app switches, and word stats.
 - **On battery:** it can switch to Apple's on-device model, stopping llama.cpp to save power and about 3.5 GB of memory, or pause until you plug in.
 - **Setup:** `brew install llama.cpp`, then put a `.gguf` model in `~/Library/Application Support/FanCurve/Models` (or import one from Cotypist).
@@ -142,7 +152,8 @@ A Raycast-style glass search panel:
 - **Global mic mute (⌃⌥M):** mutes every input device at once, including headsets plugged in while muted. An optional menu bar icon shows when you're muted.
 - **Mouse jiggler:** once you've been idle for a while (5 minutes by default), it sweeps the pointer across every monitor at a set interval (every minute by default). This keeps your Mac awake and apps like Teams showing you as active. It stops the moment you're back, and never runs with the lid closed unless you're in clamshell mode.
 - **Keyboard cleaning mode:** ignores every key press while the trackpad keeps working. It switches itself off after 5 minutes.
-- **Open at login**, plus **in-app updates** from GitHub Releases.
+- **Battery health:** charge, measured capacity against design, cycles, power draw and charger.
+- **Open at login**, plus **in-app updates** from GitHub Releases, and **Export Diagnostics** for bug reports.
 
 <p align="center">
   <img src="docs/screenshots/displays.png" width="400" alt="Displays settings">
@@ -201,7 +212,10 @@ All shortcuts can be changed in Settings. The defaults avoid AeroSpace's default
 | Search snippets | ⌃⌥S |
 | Quick Notes | ⌃⌥N |
 | Pause / resume AI autocomplete | ⌃⌥A |
-| Accept suggestion / next word / dismiss | Tab / ⌥→ / Esc |
+| Draft a reply | ⌃⌥R |
+| Accept suggestion / next word / dismiss (undo right after) | Tab / ⌥→ / Esc |
+| Clipboard history | ⌃⌥V |
+| Window snapping | set your own |
 | AeroSpace: Half + Two Quarters (stacked) | ⌃⌥Q |
 | AeroSpace: Half + Two Quarter Columns | ⌃⌥W |
 | AeroSpace: width ½ ⅓ ¼ ⅔ ¾ | set your own |
@@ -257,7 +271,7 @@ cd FanCurve
 sudo ./install.sh
 ```
 
-`build.sh` creates `build/FanCurve.app` and `build/fancurved`, stamped with a date-based version.
+`build.sh` creates `build/FanCurve.app` and `build/fancurved`, stamped with a date-based version. Run the unit tests with `swift test` (Swift Testing, which works with the Command Line Tools alone).
 
 | Script | Purpose |
 |---|---|
