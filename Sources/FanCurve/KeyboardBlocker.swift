@@ -26,8 +26,12 @@ final class KeyboardBlocker: ObservableObject {
 
     func start() {
         guard !isOn else { return }
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        guard AXIsProcessTrustedWithOptions(opts) else { needsPermission = true; return }
+        guard AXIsProcessTrusted() else {
+            needsPermission = true
+            AccessibilityPermission.shared.request()
+            AccessibilityPermission.shared.whenGranted { [weak self] in self?.needsPermission = false }
+            return
+        }
         needsPermission = false
 
         let callback: CGEventTapCallBack = { _, type, event, refcon in
@@ -70,7 +74,5 @@ final class KeyboardBlocker: ObservableObject {
         secondsLeft = 0
     }
 
-    func openAccessibilitySettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-    }
+    func openAccessibilitySettings() { AccessibilityPermission.shared.request() }
 }

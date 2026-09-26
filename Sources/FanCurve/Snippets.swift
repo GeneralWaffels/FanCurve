@@ -57,7 +57,13 @@ enum Paster {
 final class SnippetStore: ObservableObject {
     @Published var snippets: [Snippet] = [] { didSet { if snippets != oldValue { save() } } }
     @Published var editing: UUID?
-    @Published var expandEnabled: Bool { didSet { UserDefaults.standard.set(expandEnabled, forKey: "snippetExpand"); updateTap() } }
+    @Published var expandEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(expandEnabled, forKey: "snippetExpand")
+            if expandEnabled && !AXIsProcessTrusted() { AccessibilityPermission.shared.request() }
+            updateTap()
+        }
+    }
     @Published private(set) var needsPermission = false
 
     private let file: URL
@@ -150,7 +156,11 @@ final class SnippetStore: ObservableObject {
         if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes) }
         tap = nil; source = nil; buffer = ""
         guard expandEnabled else { needsPermission = false; return }
-        guard AXIsProcessTrusted() else { needsPermission = true; return }
+        guard AXIsProcessTrusted() else {
+            needsPermission = true
+            AccessibilityPermission.shared.whenGranted { [weak self] in self?.updateTap() }   // starts as soon as it's allowed
+            return
+        }
         needsPermission = false
 
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.leftMouseDown.rawValue) | (1 << CGEventType.rightMouseDown.rawValue)

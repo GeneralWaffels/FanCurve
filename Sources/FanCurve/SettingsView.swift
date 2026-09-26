@@ -401,16 +401,7 @@ struct BrightnessKeysSection: View {
             Picker("Brightness keys control", selection: $keys.mode) {
                 ForEach(BrightnessKeys.Mode.allCases) { Text($0.label).tag($0) }
             }
-            if keys.needsPermission {
-                LabeledContent {
-                    HStack {
-                        Button("Open Accessibility Settings…") { keys.openAccessibilitySettings() }
-                        Button("Try Again") { keys.update() }
-                    }
-                } label: {
-                    StatusRow(text: "FanCurve needs Accessibility access to use the brightness keys.", color: .orange)
-                }
-            }
+            if keys.mode != .off { AccessibilityRow(feature: "use the brightness keys for external displays") }
         } header: {
             Text("Brightness Keys")
         } footer: {
@@ -571,13 +562,7 @@ struct KeyboardPage: View {
                     Text("Keyboard cleaning mode")
                     Text(keyboard.isOn ? "Keys are ignored. Turns off automatically in \(mmss(keyboard.secondsLeft))." : "Ignores every key press.")
                 }
-                if keyboard.needsPermission {
-                    LabeledContent {
-                        Button("Open Accessibility Settings…") { keyboard.openAccessibilitySettings() }
-                    } label: {
-                        StatusRow(text: "FanCurve needs Accessibility access to block keys.", color: .orange)
-                    }
-                }
+                AccessibilityRow(feature: "block the keyboard while you clean it")
             } footer: {
                 Footer("Use the trackpad to switch it off, or wait \(keyboard.timeout / 60) minutes. The power button and Touch ID can't be blocked.")
             }

@@ -141,13 +141,7 @@ struct SnippetsPage: View {
                     Text("Expand keywords as you type")
                     Text("Works in any app. Password fields are always skipped.")
                 }
-                if store.needsPermission {
-                    LabeledContent {
-                        Button("Try Again") { store.updateTap() }
-                    } label: {
-                        StatusRow(text: "FanCurve needs Accessibility access to expand snippets.", color: .orange)
-                    }
-                }
+                if store.expandEnabled { AccessibilityRow(feature: "expand snippets as you type") }
                 ShortcutRow(title: "Search snippets", setting: shortcuts.snippets)
             }
 

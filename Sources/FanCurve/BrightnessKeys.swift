@@ -18,7 +18,7 @@ final class BrightnessKeys: ObservableObject {
         }
     }
 
-    @Published var mode: Mode { didSet { UserDefaults.standard.set(mode.rawValue, forKey: "brightnessKeys"); update() } }
+    @Published var mode: Mode { didSet { UserDefaults.standard.set(mode.rawValue, forKey: "brightnessKeys"); update(prompt: true) } }
     @Published private(set) var needsPermission = false
 
     private weak var displays: Displays?
@@ -36,16 +36,18 @@ final class BrightnessKeys: ObservableObject {
         update()
     }
 
-    func openAccessibilitySettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
-    }
+    func openAccessibilitySettings() { AccessibilityPermission.shared.request() }
 
     /// Installs or removes the tap to match the mode. Re-run after granting permission.
-    func update() {
+    func update(prompt: Bool = false) {
         stopTap()
         guard mode != .off else { needsPermission = false; return }
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        guard AXIsProcessTrustedWithOptions(opts) else { needsPermission = true; return }
+        guard AXIsProcessTrusted() else {
+            needsPermission = true
+            if prompt { AccessibilityPermission.shared.request() }
+            AccessibilityPermission.shared.whenGranted { [weak self] in self?.update() }
+            return
+        }
         needsPermission = false
 
         let callback: CGEventTapCallBack = { _, type, event, refcon in

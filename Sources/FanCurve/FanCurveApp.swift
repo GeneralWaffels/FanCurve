@@ -182,7 +182,7 @@ struct MenuContent: View {
         Toggle("Mute microphone\(mic.shortcut.map { "  (\($0.display))" } ?? "")", isOn: Binding(get: { mic.isMuted }, set: { mic.setMuted($0) }))
         Toggle("Keyboard cleaning mode", isOn: Binding(get: { keyboard.isOn }, set: { _ in keyboard.toggle() }))
         if keyboard.needsPermission {
-            Button("Grant Accessibility access…") { keyboard.openAccessibilitySettings() }
+            Button("Allow Accessibility Access…") { AccessibilityPermission.shared.request() }
         }
         Divider()
         Button("Command Palette\(shortcuts.palette.shortcut.map { "  (\($0.display))" } ?? "")") {
