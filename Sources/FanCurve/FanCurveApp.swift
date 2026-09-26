@@ -41,11 +41,12 @@ struct FanCurveApp: App {
     @StateObject private var autocomplete: Autocomplete
     @StateObject private var clipboard: ClipboardHistory
     @StateObject private var quicklinks: Quicklinks
+    @StateObject private var autoProfiles: AutoProfiles
 
     init() {
         let model = Model(), keyboard = KeyboardBlocker(), displays = Displays(), mic = MicMuter()
         let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites(), obsidian = Obsidian(), quickNotes = QuickNotes(), jiggler = MouseJiggler(), autocomplete = Autocomplete()
-        let clipboard = ClipboardHistory(), quicklinks = Quicklinks()
+        let clipboard = ClipboardHistory(), quicklinks = Quicklinks(), autoProfiles = AutoProfiles(model: model, calendar: calendar)
         quickNotes.obsidian = obsidian
         favourites.aero = aero
         LauncherPanel.shared.favourites = favourites
@@ -104,12 +105,13 @@ struct FanCurveApp: App {
         _autocomplete = StateObject(wrappedValue: autocomplete)
         _clipboard = StateObject(wrappedValue: clipboard)
         _quicklinks = StateObject(wrappedValue: quicklinks)
+        _autoProfiles = StateObject(wrappedValue: autoProfiles)
     }
 
     var body: some Scene {
         MenuBarExtra {
             MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav).environmentObject(updater)
-                .environmentObject(calendar).environmentObject(shortcuts).environmentObject(quickNotes).environmentObject(jiggler).environmentObject(autocomplete).environmentObject(clipboard).environmentObject(quicklinks)
+                .environmentObject(calendar).environmentObject(shortcuts).environmentObject(quickNotes).environmentObject(jiggler).environmentObject(autocomplete).environmentObject(clipboard).environmentObject(quicklinks).environmentObject(autoProfiles)
         } label: {
             MenuBarLabel(nav: nav) {
                 if keyboard.isOn {
@@ -127,7 +129,7 @@ struct FanCurveApp: App {
                 .environmentObject(brightnessKeys).environmentObject(loginItem).environmentObject(updater)
                 .environmentObject(calendar).environmentObject(snippets).environmentObject(shortcuts).environmentObject(aero)
                 .environmentObject(favourites).environmentObject(obsidian).environmentObject(quickNotes)
-                .environmentObject(jiggler).environmentObject(autocomplete).environmentObject(clipboard).environmentObject(quicklinks)
+                .environmentObject(jiggler).environmentObject(autocomplete).environmentObject(clipboard).environmentObject(quicklinks).environmentObject(autoProfiles)
         }
         .defaultSize(width: 760, height: 680)
         .windowToolbarStyle(.unified)
@@ -236,8 +238,8 @@ struct MenuContent: View {
 final class AppNav: ObservableObject {
     static let shared = AppNav()
     enum Page: String, CaseIterable, Identifiable {
-        case general, fans, displays, mic, keyboard, awake, calendar, snippets, autocomplete, launcher
-        static let groups: [[Page]] = [[.general], [.fans, .displays, .mic, .keyboard, .awake], [.launcher, .autocomplete, .calendar, .snippets]]
+        case general, fans, battery, displays, mic, keyboard, awake, calendar, snippets, autocomplete, launcher
+        static let groups: [[Page]] = [[.general], [.fans, .battery, .displays, .mic, .keyboard, .awake], [.launcher, .autocomplete, .calendar, .snippets]]
         var id: String { rawValue }
         var title: String {
             switch self {
@@ -248,6 +250,7 @@ final class AppNav: ObservableObject {
             case .snippets: return "Snippets"
             case .launcher: return "Command Palette"
             case .fans: return "Fans"
+            case .battery: return "Battery"
             case .displays: return "Displays"
             case .mic: return "Microphone"
             case .keyboard: return "Keyboard"
@@ -262,6 +265,7 @@ final class AppNav: ObservableObject {
             case .snippets: return "text.quote"
             case .launcher: return "command"
             case .fans: return "fan.fill"
+            case .battery: return "battery.100percent"
             case .displays: return "display"
             case .mic: return "mic.fill"
             case .keyboard: return "keyboard.fill"
@@ -276,7 +280,8 @@ final class AppNav: ObservableObject {
             case .calendar: return ["meeting", "join", "zoom", "schedule", "agenda", "notification"]
             case .snippets: return ["snippet", "text", "expand", "keyword", "abbreviation"]
             case .launcher: return ["palette", "launcher", "raycast", "search", "apps", "calculator", "obsidian", "notes", "daily note", "clipboard", "quicklinks", "links", "window", "snap", "rectangle"]
-            case .fans: return ["curve", "temperature", "profile", "noctua", "rpm", "cooling"]
+            case .fans: return ["curve", "temperature", "profile", "noctua", "rpm", "cooling", "history", "graph", "automatic"]
+            case .battery: return ["battery", "health", "cycles", "capacity", "charging", "charge limit", "power"]
             case .displays: return ["brightness", "monitor", "ddc", "light sensor", "keys"]
             case .mic: return ["mute", "shortcut", "microphone", "hotkey"]
             case .keyboard: return ["cleaning", "block", "keys"]
@@ -291,6 +296,7 @@ final class AppNav: ObservableObject {
             case .snippets: return .orange
             case .launcher: return .purple
             case .fans: return .blue
+            case .battery: return .green
             case .displays: return .indigo
             case .mic: return .red
             case .keyboard: return .gray

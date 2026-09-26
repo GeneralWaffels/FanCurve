@@ -10,6 +10,9 @@ final class Model: ObservableObject {
     @Published var saveError: String?
     /// User-saved curves (name → points). Built-in Noctua presets are separate and can't be deleted.
     @Published private(set) var customProfiles: [String: [CurvePoint]] = [:]
+    /// Temperature and fan speed every few seconds over the last 3 hours (memory only), for the graph.
+    @Published private(set) var history: [HistorySample] = []
+    static let historyWindow: TimeInterval = 3 * 3600
 
     let hw: Hardware?
     private var timer: Timer?
@@ -61,6 +64,18 @@ final class Model: ObservableObject {
         if newFans != fans { fans = newFans }
         let newStatus = Paths.loadStatus()
         if newStatus != status { status = newStatus }
+        record()
+    }
+
+    private func record() {
+        let now = Date()
+        if let last = history.last, now.timeIntervalSince(last.id) < 5 { return }
+        let running = fans.filter { $0.actual >= 100 }
+        let rpm = running.isEmpty ? 0 : running.map(\.actual).reduce(0, +) / Double(running.count)
+        history.append(HistorySample(id: now, temp: temps[config.source], rpm: rpm))
+        if let first = history.first, now.timeIntervalSince(first.id) > Self.historyWindow + 60 {
+            history.removeAll { now.timeIntervalSince($0.id) > Self.historyWindow }
+        }
     }
 
     private func scheduleSave() {
@@ -109,4 +124,10 @@ final class Model: ObservableObject {
     private func persistProfiles() {
         if let d = try? JSONEncoder().encode(customProfiles) { UserDefaults.standard.set(d, forKey: "customProfiles") }
     }
+}
+
+struct HistorySample: Identifiable, Equatable {
+    let id: Date
+    let temp: Double?
+    let rpm: Double
 }

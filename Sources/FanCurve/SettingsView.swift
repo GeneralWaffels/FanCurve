@@ -39,6 +39,7 @@ struct SettingsView: View {
                 case .snippets: SnippetsPage()
                 case .launcher: LauncherPage()
                 case .fans: FansPage()
+                case .battery: BatteryPage()
                 case .displays: DisplaysPage()
                 case .mic: MicPage()
                 case .keyboard: KeyboardPage()
@@ -263,6 +264,10 @@ struct FansPage: View {
             } footer: {
                 Footer("Smoothing evens out quick temperature swings. Idle fans wait for the spin-up delay before starting, so short bursts of work don't wake them. Above the maximum temperature, fans always run flat out.")
             }
+
+            FanHistorySection()
+
+            AutoProfilesSection()
         }
         .formStyle(.grouped)
     }
