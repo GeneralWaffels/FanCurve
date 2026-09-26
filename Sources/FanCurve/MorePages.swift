@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 final class AppShortcuts: ObservableObject {
     let palette: ShortcutSetting
+    lazy var spotlight = SpotlightTakeover(palette: palette)
     let joinMeeting: ShortcutSetting
     let schedule: ShortcutSetting
     let snippets: ShortcutSetting
@@ -232,12 +233,13 @@ struct LauncherPage: View {
             PageHeader(page: .launcher, description: "One shortcut to launch your favourite apps, run FanCurve commands, join meetings, paste snippets and do quick maths.")
 
             Section {
+                SpotlightTakeoverRow(takeover: shortcuts.spotlight)
                 ShortcutRow(title: "Open command palette", setting: shortcuts.palette)
                 LabeledContent("Try it") {
                     Button("Open Command Palette") { NotificationCenter.default.post(name: AppDelegate.openPalette, object: nil) }
                 }
             } footer: {
-                Footer("⌥Space is the default, like Raycast. If you also use Raycast or Alfred, give one of them a different shortcut.")
+                Footer("⌥Space is the default, like Raycast. Turn on ⌘Space to replace Spotlight instead. If you also use Raycast or Alfred, give one of them a different shortcut.")
             }
 
             FavouritesSection()

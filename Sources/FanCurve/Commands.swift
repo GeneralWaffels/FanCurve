@@ -167,6 +167,10 @@ final class CommandSource: PanelSource {
                       keywords: ["screensaver"]) {
                 Self.run("/usr/bin/open", ["-a", "ScreenSaverEngine"]); return true
             },
+            PanelItem(id: "sys.spotlight", section: "System", title: "Spotlight Search", subtitle: "Open macOS Spotlight",
+                      symbol: "magnifyingglass", tint: .gray, keywords: ["spotlight", "search", "find"]) {
+                Self.run("/usr/bin/open", ["-b", "com.apple.Spotlight"]); return true
+            },
             PanelItem(id: "sys.dark", section: "System", title: "Toggle Dark Mode", symbol: "circle.lefthalf.filled", tint: .gray,
                       keywords: ["dark", "light", "appearance"]) {
                 Self.run("/usr/bin/osascript", ["-e", "tell application \"System Events\" to tell appearance preferences to set dark mode to not dark mode"])

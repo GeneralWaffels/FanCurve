@@ -157,7 +157,7 @@ All shortcuts can be changed in Settings. The defaults avoid AeroSpace's default
 
 | Action | Default |
 |---|---|
-| Command palette | ⌥Space |
+| Command palette | ⌥Space (or ⌘Space, replacing Spotlight: Settings → Command Palette) |
 | Launch favourite 1–9 | ⌃⌥1 … ⌃⌥9 |
 | Mute / unmute microphone | ⌃⌥M |
 | Join next meeting | ⌃⌥J |
