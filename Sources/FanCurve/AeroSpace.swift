@@ -88,6 +88,72 @@ final class AeroSpace: ObservableObject {
         }
     }
 
+    // MARK: sizes & layouts
+
+    /// Usable width of the monitor AeroSpace has focused (points), minus outer gaps.
+    nonisolated private static func focusedMonitorWidth(_ cli: String, gaps: Int) -> CGFloat {
+        let name = exec(cli, ["list-monitors", "--focused", "--format", "%{monitor-name}"]).out.trimmingCharacters(in: .whitespacesAndNewlines)
+        let screen = DispatchQueue.main.sync { () -> CGFloat in
+            let s = NSScreen.screens.first { $0.localizedName == name } ?? NSScreen.main
+            return s?.visibleFrame.width ?? 1440
+        }
+        return screen - CGFloat(gaps * 2)
+    }
+
+    /// Resizes the focused window to a fraction of the monitor's width (e.g. 0.5, 0.25).
+    func resizeFocused(widthFraction f: CGFloat) {
+        guard let cli else { NSSound.beep(); return }
+        let gaps = self.gaps ?? 0
+        Task.detached {
+            let w = Self.focusedMonitorWidth(cli, gaps: gaps)
+            let r = Self.exec(cli, ["resize", "width", String(Int((w * f).rounded()) - gaps / 2)])
+            await MainActor.run { if !r.ok { NSSound.beep(); self.lastError = r.out } }
+        }
+    }
+
+    enum Layout { case halfStackedQuarters, halfQuarterColumns }
+
+    /// Rebuilds the focused workspace: the focused window takes the left half; the others fill the
+    /// right half, either stacked (each a quarter of the screen) or as quarter-width columns.
+    func applyLayout(_ layout: Layout) {
+        guard let cli else { NSSound.beep(); return }
+        let gaps = self.gaps ?? 0
+        Task.detached {
+            let main = Self.exec(cli, ["list-windows", "--focused", "--format", "%{window-id}"]).out
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let count = Int(Self.exec(cli, ["list-windows", "--workspace", "focused", "--count"]).out
+                .trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+            guard !main.isEmpty, count >= 2 else {
+                await MainActor.run { NSSound.beep(); self.lastError = "Needs at least two windows on this workspace." }
+                return
+            }
+            _ = Self.exec(cli, ["flatten-workspace-tree"])
+            _ = Self.exec(cli, ["layout", "h_tiles"])
+            // Move the focused window to the far left (swap fails once it reaches the edge).
+            for _ in 0..<count where Self.exec(cli, ["swap", "left"]).ok {}
+            if layout == .halfStackedQuarters && count >= 3 {
+                // Stack everything to the right of the main window into one vertical column.
+                _ = Self.exec(cli, ["focus", "right"])
+                _ = Self.exec(cli, ["focus", "right"])
+                _ = Self.exec(cli, ["join-with", "left"])
+                for _ in 3..<count {
+                    _ = Self.exec(cli, ["focus", "right"])
+                    _ = Self.exec(cli, ["move", "left"])
+                }
+            }
+            _ = Self.exec(cli, ["focus", "--window-id", main])
+            let w = Self.focusedMonitorWidth(cli, gaps: gaps)
+            _ = Self.exec(cli, ["resize", "width", String(Int((w / 2).rounded()) - gaps / 2)])
+            if layout == .halfQuarterColumns && count >= 3 {
+                // Make the remaining columns equal: the first neighbour gets a quarter, the rest share the rest.
+                _ = Self.exec(cli, ["focus", "right"])
+                _ = Self.exec(cli, ["resize", "width", String(Int((w / CGFloat(2 * (count - 1))).rounded()) - gaps / 2)])
+                _ = Self.exec(cli, ["focus", "--window-id", main])
+            }
+            await MainActor.run { self.refresh() }
+        }
+    }
+
     func launch() { NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: "/Applications/AeroSpace.app"), configuration: .init()) }
 
     // MARK: config file
@@ -210,6 +276,16 @@ final class AeroSpaceSource: PanelSource {
             cmd("orientation", "Flip Orientation", "Horizontal ↔ vertical", "arrow.left.arrow.right", ["layout", "horizontal", "vertical"], ["rotate", "orientation"]),
             cmd("fullscreen", "Toggle Fullscreen", nil, "arrow.up.left.and.arrow.down.right", ["fullscreen"], ["fullscreen", "maximize"]),
             cmd("balance", "Balance Window Sizes", nil, "equal.square", ["balance-sizes"], ["balance", "equal"]),
+            PanelItem(id: "aero.layout.stack", section: "AeroSpace Layouts", title: "Half + Two Quarters (Stacked)",
+                      subtitle: "Focused window on the left half; the others stacked on the right, a quarter each",
+                      symbol: "rectangle.split.2x1", tint: tint, keywords: ["aerospace", "layout", "half", "quarter", "split", "stack"]) {
+                a.applyLayout(.halfStackedQuarters); return true
+            },
+            PanelItem(id: "aero.layout.cols", section: "AeroSpace Layouts", title: "Half + Two Quarter Columns",
+                      subtitle: "Three columns: ½ · ¼ · ¼ (focused window gets the half)",
+                      symbol: "rectangle.split.3x1", tint: tint, keywords: ["aerospace", "layout", "half", "quarter", "columns"]) {
+                a.applyLayout(.halfQuarterColumns); return true
+            },
             cmd("flatten", "Flatten Workspace Tree", "Reset nested splits", "square.3.layers.3d.down.right", ["flatten-workspace-tree"], ["flatten", "reset"]),
             cmd("monitor", "Move Workspace to Next Monitor", nil, "display.2", ["move-workspace-to-monitor", "--wrap-around", "next"], ["monitor", "display"]),
             cmd("backforth", "Previous Workspace", nil, "arrow.uturn.backward", ["workspace-back-and-forth"], ["back", "previous"]),
@@ -217,6 +293,15 @@ final class AeroSpaceSource: PanelSource {
             PanelItem(id: "aero.config", section: "AeroSpace", title: "Open AeroSpace Config", subtitle: a.configURL.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"),
                       symbol: "doc.text", tint: tint, keywords: ["aerospace", "config", "edit", "toml"]) { a.openConfig(); return true },
         ]
+
+        for (label, f, sym) in [("½", 0.5, "rectangle.lefthalf.filled"), ("⅓", 1.0 / 3, "rectangle.split.3x1"), ("¼", 0.25, "rectangle.leadingthird.inset.filled"),
+                                ("⅔", 2.0 / 3, "rectangle.split.2x1"), ("¾", 0.75, "rectangle.inset.filled")] {
+            items.append(PanelItem(id: "aero.width.\(label)", section: "AeroSpace Layouts", title: "Width: \(label) of Screen",
+                                   subtitle: "Resize the focused window", symbol: sym, tint: tint,
+                                   keywords: ["aerospace", "resize", "width", "size", label == "½" ? "half" : label == "¼" ? "quarter" : label == "⅓" ? "third" : ""]) {
+                a.resizeFocused(widthFraction: CGFloat(f)); return true
+            })
+        }
 
         // Settings (edit the config file, then reload).
         let gapsOn = (a.gaps ?? 0) > 0
