@@ -139,10 +139,11 @@ final class LauncherPanel: NSObject, NSWindowDelegate {
         if isVisible, model.source === source { close() } else { show(source) }
     }
 
-    func show(_ source: PanelSource) {
+    func show(_ source: PanelSource, query: String = "") {
         if !isVisible { previousApp = NSWorkspace.shared.frontmostApplication }
         source.willShow()
         model.source = source
+        if !query.isEmpty { model.query = query }
         let panel = self.panel ?? make()
         self.panel = panel
         let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main

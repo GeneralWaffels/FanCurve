@@ -47,6 +47,12 @@ enum DebugSnapshot {
                     try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name + ".png"))
                 }
             }
+            // Spotlight file search mode.
+            LauncherPanel.shared.show(FileSearchSource.shared, query: "fancurve")
+            try? await Task.sleep(for: .seconds(2))
+            if let n = LauncherPanel.shared.windowNumber, let cg = windowImage(n) {
+                try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("palette-files.png"))
+            }
             exit(0)
         }
     }

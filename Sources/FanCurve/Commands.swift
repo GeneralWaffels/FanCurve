@@ -70,6 +70,11 @@ final class CommandSource: PanelSource {
             return out + favItems + commands.map { var i = $0; i.section = "Suggestions"; return i }
         }
         commands = favItems + commands + appItems
+        let q = query.trimmingCharacters(in: .whitespaces)
+        let searchFiles = PanelItem(id: "files.for", section: "Files", title: "Search Files for “\(q)”",
+                                    subtitle: "Spotlight", symbol: "doc.text.magnifyingglass", tint: .gray) {
+            LauncherPanel.shared.show(FileSearchSource.shared, query: q); return true
+        }
         // Matching Obsidian notes (titles only here; the Obsidian view also searches text).
         if d.obsidian.installed, query.trimmingCharacters(in: .whitespaces).count >= 2 {
             let obs = d.obsidian
@@ -78,9 +83,9 @@ final class CommandSource: PanelSource {
                           subtitle: r.note.folder.isEmpty ? obs.vault?.name : r.note.folder, accessory: "Note",
                           image: obs.appIcon) { obs.open(r.note); return true }
             }
-            return out + commands.filtered(query) + notes
+            return out + commands.filtered(query) + notes + [searchFiles]
         }
-        return out + commands.filtered(query)
+        return out + commands.filtered(query) + (q.count >= 2 ? [searchFiles] : [])
     }
 
     // MARK: sections
@@ -190,9 +195,10 @@ final class CommandSource: PanelSource {
                       keywords: ["screensaver"]) {
                 Self.run("/usr/bin/open", ["-a", "ScreenSaverEngine"]); return true
             },
-            PanelItem(id: "sys.spotlight", section: "System", title: "Spotlight Search", subtitle: "Open macOS Spotlight",
-                      symbol: "magnifyingglass", tint: .gray, keywords: ["spotlight", "search", "find"]) {
-                Self.run("/usr/bin/open", ["-b", "com.apple.Spotlight"]); return true
+            PanelItem(id: "sys.spotlight", section: "System", title: "Spotlight Search",
+                      subtitle: SpotlightTakeover.spotlightShortcutDisabled ? "Search files with Spotlight, right here" : "Open macOS Spotlight",
+                      symbol: "magnifyingglass", tint: .gray, keywords: ["spotlight", "search", "find", "files", "documents"]) {
+                FileSearchSource.openSpotlightOrSearch(); return true
             },
             PanelItem(id: "sys.dark", section: "System", title: "Toggle Dark Mode", symbol: "circle.lefthalf.filled", tint: .gray,
                       keywords: ["dark", "light", "appearance"]) {
