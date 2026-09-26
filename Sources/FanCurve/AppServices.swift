@@ -137,7 +137,7 @@ final class Updater: ObservableObject {
         case 200: break
         case 401: throw UpdateError("GitHub rejected the token. Paste a new one below.")
         case 404: throw UpdateError(hasToken ? "No releases found, or the token can't read \(repo). Publish one with ./release.sh."
-                                             : "\(repo) is private: add a GitHub token below, or publish a release with ./release.sh.")
+                                             : "No releases found for \(repo). If it's a private repository, add a GitHub token below.")
         case 403: throw UpdateError("GitHub rate limit reached. Try again later.")
         default: throw URLError(.badServerResponse)
         }

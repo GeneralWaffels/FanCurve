@@ -14,7 +14,7 @@ fi
 VERSION=$(cat build/VERSION)
 OUT=dist/release; rm -rf "$OUT" dist/stage; mkdir -p "$OUT" dist/stage/FanCurve/build
 cp -R build/FanCurve.app build/fancurved build/VERSION dist/stage/FanCurve/build/
-cp install.sh uninstall.sh update.sh README.md dist/stage/FanCurve/
+cp install.sh uninstall.sh update.sh README.md LICENSE dist/stage/FanCurve/
 (cd dist/stage && zip -qry "../../$OUT/FanCurve.zip" FanCurve)
 rm -rf dist/stage
 shasum -a 256 "$OUT/FanCurve.zip" | cut -d' ' -f1 > "$OUT/FanCurve.zip.sha256"

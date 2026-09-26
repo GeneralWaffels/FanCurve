@@ -1,0 +1,15 @@
+name: Feature request
+description: Suggest an idea for FanCurve
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like FanCurve to do?
+      description: Describe the problem or workflow, not just the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: How do you handle this today?

@@ -1,0 +1,26 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcrun --show-sdk-version
+          swift --version
+      - name: Build (release app bundle)
+        run: ./build.sh
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: FanCurve
+          path: |
+            build/FanCurve.app
+            build/fancurved

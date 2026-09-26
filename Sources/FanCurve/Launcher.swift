@@ -165,24 +165,27 @@ final class LauncherPanel: NSObject, NSWindowDelegate {
     private func installKeyMonitor() {
         guard keyMonitor == nil else { return }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.window === self.panel,
-                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+            guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
                   let chars = event.charactersIgnoringModifiers?.lowercased() else { return event }
-            return MainActor.assumeIsolated {
-                if let n = Int(chars), (1...9).contains(n), let favs = self.favourites {
-                    self.close()
-                    favs.launch(n - 1)
-                    return nil
-                }
-                if chars == "f", self.model.items.indices.contains(self.model.selection),
-                   let url = self.model.items[self.model.selection].appURL, let favs = self.favourites {
-                    favs.toggle(url)
-                    self.model.reload()
-                    return nil
-                }
-                return event
-            }
+            let inPanel = event.window?.windowNumber
+            let handled = MainActor.assumeIsolated { self?.handleCommandKey(chars, windowNumber: inPanel) ?? false }
+            return handled ? nil : event
         }
+    }
+
+    private func handleCommandKey(_ chars: String, windowNumber: Int?) -> Bool {
+        guard windowNumber == panel?.windowNumber, let favs = favourites else { return false }
+        if let n = Int(chars), (1...9).contains(n) {
+            close()
+            favs.launch(n - 1)
+            return true
+        }
+        if chars == "f", model.items.indices.contains(model.selection), let url = model.items[model.selection].appURL {
+            favs.toggle(url)
+            model.reload()
+            return true
+        }
+        return false
     }
 
     var selectedIsApp: Bool { model.items.indices.contains(model.selection) && model.items[model.selection].appURL != nil }
@@ -196,9 +199,12 @@ final class LauncherPanel: NSObject, NSWindowDelegate {
     }
 
     /// Hands focus back to the app that was in front, then runs `then` (e.g. a paste).
-    func returnToPreviousApp(then: @escaping () -> Void) {
+    func returnToPreviousApp(then: @escaping @MainActor () -> Void) {
         previousApp?.activate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: then)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(180))
+            then()
+        }
     }
 
     /// Debug snapshots render the panel while another window has focus; don't auto-close then.
@@ -218,7 +224,15 @@ final class LauncherPanel: NSObject, NSWindowDelegate {
         p.isMovableByWindowBackground = true
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         p.delegate = self
-        p.contentView = NSHostingView(rootView: LauncherView(model: model, panel: self))
+        let host = NSHostingView(rootView: LauncherView(model: model, panel: self))
+        // Clip to the glass shape so the rectangular window never shows square corners.
+        host.wantsLayer = true
+        host.layer?.cornerRadius = 22
+        host.layer?.cornerCurve = .continuous
+        host.layer?.masksToBounds = true
+        host.layer?.backgroundColor = .clear
+        p.contentView = host
+        p.invalidateShadow()
         return p
     }
 }
@@ -351,7 +365,11 @@ struct PanelSearchField: NSViewRepresentable {
 
     func updateNSView(_ f: NSTextField, context: Context) {
         context.coordinator.parent = self
-        if f.stringValue != text { f.stringValue = text }
+        if f.stringValue != text {
+            f.stringValue = text
+            // Programmatic changes put the caret at the end instead of selecting everything.
+            DispatchQueue.main.async { f.currentEditor()?.selectedRange = NSRange(location: (text as NSString).length, length: 0) }
+        }
         f.placeholderString = placeholder
         DispatchQueue.main.async { if f.window?.firstResponder !== f.currentEditor() { f.window?.makeFirstResponder(f) } }
     }

@@ -21,8 +21,12 @@ enum DebugSnapshot {
             NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil)
             try? await Task.sleep(for: .seconds(1.5))
             guard let window = NSApp.windows.first(where: { $0.title.contains("Settings") || $0.identifier?.rawValue.contains("settings") == true }) else { exit(1) }
+            // Taller window so full pages (e.g. the whole fan curve) fit in README screenshots.
+            if let h = CommandLine.arguments.firstIndex(of: "--height").flatMap({ Double(CommandLine.arguments[$0 + 1]) }) {
+                window.setContentSize(NSSize(width: window.frame.width, height: h))
+            }
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
-                window.appearance = NSAppearance(named: appearance)
+                NSApp.appearance = NSAppearance(named: appearance)   // app-wide, so SwiftUI content follows too
                 for page in AppNav.Page.allCases {
                     AppNav.shared.page = page
                     try? await Task.sleep(for: .milliseconds(900))
@@ -32,6 +36,7 @@ enum DebugSnapshot {
                     }
                 }
             }
+            NSApp.appearance = NSAppearance(named: .darkAqua)
             // The command palette itself: suggestions, then a calculator query.
             LauncherPanel.shared.keepOpenOnResign = true
             NotificationCenter.default.post(name: AppDelegate.openPalette, object: nil)
@@ -52,8 +57,10 @@ enum DebugSnapshot {
         typealias Fn = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
         guard let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else { return nil }
         let fn = unsafeBitCast(sym, to: Fn.self)
-        // listOptions: optionIncludingWindow (8); imageOptions: boundsIgnoreFraming (1) | bestResolution (8)
-        return fn(.null, 8, UInt32(number), 1 | 8)?.takeRetainedValue()
+        // listOptions: optionIncludingWindow (8); imageOptions: bestResolution (8), plus boundsIgnoreFraming (1)
+        // unless --shadow is passed (then the window's own shadow is included on a transparent background).
+        let framing: UInt32 = CommandLine.arguments.contains("--shadow") ? 0 : 1
+        return fn(.null, 8, UInt32(number), framing | 8)?.takeRetainedValue()
     }
 }
 #endif

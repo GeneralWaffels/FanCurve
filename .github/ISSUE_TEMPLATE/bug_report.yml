@@ -1,0 +1,33 @@
+name: Bug report
+description: Something isn't working as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac and macOS version
+      placeholder: MacBook Pro 16" (M4 Pro), macOS 27.0
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: FanCurve version
+      description: Settings → General → Current version
+  - type: textarea
+    id: sensors
+    attributes:
+      label: Output of `fancurved sensors` (for fan or temperature issues)
+      render: text
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant lines from /var/log/fancurved.log
+      render: text
