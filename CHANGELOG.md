@@ -5,6 +5,8 @@ FanCurve uses date-based versions (`YYYY.MM.DD.HHMM`). See [Releases](../../rele
 ## 2026-09-26
 
 ### Added
+- **AI autocomplete:** local llama.cpp + GGUF model with ghost text at the cursor (Tab / ⌥→ / Esc). It uses screen context and a style prompt, and personalises from local history. Imports Cotypist's model and style.
+- **Shortcuts for AeroSpace layouts** (⌃⌥Q, ⌃⌥W).
 - **AeroSpace layouts:** width commands (½ ⅓ ¼ ⅔ ¾) and two presets, Half + Two Quarters (stacked) and Half + Two Quarter Columns.
 - **Mouse jiggler** (Settings → Keep Awake), with an adjustable idle delay and interval. It moves across all monitors and doesn't prevent sleep with the lid closed unless in clamshell mode.
 - **Quick Notes (⌃⌥N):** a floating notes window with a note list. It saves as you type, you can search it from the palette, and you can move a note to Obsidian.

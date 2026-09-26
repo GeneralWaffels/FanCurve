@@ -1,6 +1,7 @@
 import Carbon.HIToolbox
 import EventKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Global shortcuts for the launcher features, shared with Settings.
 @MainActor
@@ -11,6 +12,7 @@ final class AppShortcuts: ObservableObject {
     let schedule: ShortcutSetting
     let snippets: ShortcutSetting
     let quickNotes: ShortcutSetting
+    var autocompletePause: ShortcutSetting?
     /// AeroSpace layout/width shortcuts, keyed by AeroSpace.shortcutActions id.
     var layouts: [String: ShortcutSetting] = [:]
 
@@ -235,6 +237,135 @@ private struct SnippetEditor: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Autocomplete
+
+struct AutocompletePage: View {
+    @EnvironmentObject var ac: Autocomplete
+    @EnvironmentObject var shortcuts: AppShortcuts
+
+    var body: some View {
+        Form {
+            PageHeader(page: .autocomplete, description: "AI suggestions as you type, in any app. A local model predicts your next words; nothing leaves your Mac.")
+
+            Section {
+                Toggle(isOn: $ac.enabled) {
+                    Text("Autocomplete")
+                    Text("Press Tab to accept a suggestion, ⌥→ for just the next word, Esc to dismiss.")
+                }
+                if ac.enabled {
+                    AccessibilityRow(feature: "read what you type and insert suggestions")
+                    LabeledContent("Model") { engineStatus }
+                }
+                if let s = shortcuts.autocompletePause { ShortcutRow(title: "Pause or resume", setting: s) }
+            } footer: {
+                Footer("Suggestions appear in native apps such as Mail, Messages, Notes, Slack and Obsidian. Some browsers and Electron apps don't report the cursor position, so suggestions may not show there. Password fields and the apps below are always skipped.")
+            }
+
+            Section {
+                if ac.availableModels.isEmpty {
+                    StatusRow(text: "No model installed yet.", color: .orange)
+                } else {
+                    Picker("Model file", selection: $ac.modelFile) {
+                        ForEach(ac.availableModels, id: \.self) { Text($0).tag($0) }
+                    }
+                }
+                LabeledContent("Get a model") {
+                    HStack {
+                        if ac.cotypistModel != nil { Button("Import from Cotypist") { ac.importCotypistModel() } }
+                        Button("Show Models Folder") { NSWorkspace.shared.activateFileViewerSelecting([ac.modelsFolder]) }
+                    }
+                }
+                if ac.serverPath == nil {
+                    StatusRow(text: "llama.cpp isn't installed. Install it with: brew install llama.cpp", color: .orange)
+                }
+            } header: {
+                Text("Model")
+            } footer: {
+                Footer("Any GGUF model works; small ones are fastest. Gemma 4 E2B (about 3.5 GB) gives good suggestions in roughly 0.1 s on Apple Silicon. Put .gguf files in the Models folder.")
+            }
+
+            Section {
+                TextEditor(text: $ac.style)
+                    .font(.body)
+                    .frame(minHeight: 80)
+                    .scrollContentBackground(.hidden)
+                if UserDefaults(suiteName: "app.cotypist.Cotypist")?.string(forKey: "CompletionManager_userPrompt") != nil {
+                    Button("Import Style from Cotypist") { ac.importCotypistStyle() }.buttonStyle(.borderless)
+                }
+            } header: {
+                Text("Your Writing Style")
+            } footer: {
+                Footer("Tell the model who you are and how you write, for example your name, language, spelling and tone.")
+            }
+
+            Section {
+                Toggle(isOn: $ac.useScreenContext) {
+                    Text("Use what's on screen")
+                    Text("Includes visible text from the window you're typing in, so replies fit the conversation.")
+                }
+                Toggle(isOn: $ac.learn) {
+                    Text("Learn from how I write")
+                    Text("Keeps lines you finish and suggestions you accept, and uses similar ones as examples.")
+                }
+                LabeledContent("Remembered") {
+                    HStack {
+                        Text("\(ac.historyCount) lines").monospacedDigit().foregroundStyle(.secondary)
+                        Button("Forget All") { ac.forgetHistory() }.disabled(ac.historyCount == 0)
+                    }
+                }
+                LabeledContent("Accepted suggestions") {
+                    Text("\(ac.accepted)" + (ac.lastLatency.map { " · last \($0) ms" } ?? "")).monospacedDigit().foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Personalisation")
+            } footer: {
+                Footer("Everything stays on this Mac, in ~/Library/Application Support/FanCurve. Nothing is uploaded, and there's no training-data collection.")
+            }
+
+            Section {
+                ForEach(ac.excludedApps, id: \.self) { id in
+                    HStack {
+                        Text(appName(id))
+                        Spacer()
+                        Button { ac.excludedApps.removeAll { $0 == id } } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.secondary) }
+                            .buttonStyle(.borderless)
+                    }
+                }
+                Button { addApp() } label: { Label("Add App…", systemImage: "plus") }.buttonStyle(.borderless)
+            } header: {
+                Text("Never Suggest In")
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder private var engineStatus: some View {
+        switch ac.engine {
+        case .off: StatusRow(text: "Off", color: .secondary).fixedSize()
+        case .notInstalled: StatusRow(text: "llama.cpp not installed", color: .orange).fixedSize()
+        case .noModel: StatusRow(text: "No model selected", color: .orange).fixedSize()
+        case .starting: StatusRow(text: "Loading \(ac.modelFile)…", color: .orange).fixedSize()
+        case .ready: StatusRow(text: "Ready · \(ac.modelFile)", color: .green).fixedSize()
+        case .failed(let m): StatusRow(text: m, color: .red).fixedSize()
+        }
+    }
+
+    private func appName(_ id: String) -> String {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: id).map { FileManager.default.displayName(atPath: $0.path) } ?? id
+    }
+
+    private func addApp() {
+        let panel = NSOpenPanel()
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = true
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls {
+            if let id = Bundle(url: url)?.bundleIdentifier, !ac.excludedApps.contains(id) { ac.excludedApps.append(id) }
+        }
     }
 }
 

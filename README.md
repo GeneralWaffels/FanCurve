@@ -119,6 +119,15 @@ A Raycast-style glass search panel:
 - **Search and paste (⌃⌥S)** into the app you were using.
 - **Password fields are never touched.**
 
+### AI autocomplete
+
+- **Suggestions as you type**, in any app, from a local model (llama.cpp running a GGUF model such as Gemma 4 E2B). Suggestions arrive in about 0.1 s on Apple Silicon, and nothing leaves your Mac.
+- **Keys:** Tab accepts the whole suggestion, ⌥→ accepts the next word, and Esc dismisses it. ⌃⌥A pauses or resumes.
+- **Context:** it uses the text before your cursor, the app you're in, and optionally the visible text in the window.
+- **Personalisation:** your writing-style prompt, plus examples of your own writing (lines you finish and suggestions you accept), all stored locally.
+- **Skipped:** password fields, and any app you exclude.
+- **Setup:** `brew install llama.cpp`, then put a `.gguf` model in `~/Library/Application Support/FanCurve/Models` (or import one from Cotypist).
+
 ### Displays
 
 - **DDC/CI brightness** for external monitors over USB-C, Thunderbolt or DisplayPort, with no extra drivers.
@@ -188,6 +197,8 @@ All shortcuts can be changed in Settings. The defaults avoid AeroSpace's default
 | Show schedule | ⌃⌥C |
 | Search snippets | ⌃⌥S |
 | Quick Notes | ⌃⌥N |
+| Pause / resume AI autocomplete | ⌃⌥A |
+| Accept suggestion / next word / dismiss | Tab / ⌥→ / Esc |
 | AeroSpace: Half + Two Quarters (stacked) | ⌃⌥Q |
 | AeroSpace: Half + Two Quarter Columns | ⌃⌥W |
 | AeroSpace: width ½ ⅓ ¼ ⅔ ¾ | set your own |

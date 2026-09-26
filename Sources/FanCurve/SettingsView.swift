@@ -34,6 +34,7 @@ struct SettingsView: View {
                 switch nav.page {
                 case .general: GeneralPage()
                 case .awake: KeepAwakePage()
+                case .autocomplete: AutocompletePage()
                 case .calendar: CalendarPage()
                 case .snippets: SnippetsPage()
                 case .launcher: LauncherPage()

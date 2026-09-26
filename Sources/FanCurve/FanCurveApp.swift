@@ -38,17 +38,18 @@ struct FanCurveApp: App {
     @StateObject private var obsidian: Obsidian
     @StateObject private var quickNotes: QuickNotes
     @StateObject private var jiggler: MouseJiggler
+    @StateObject private var autocomplete: Autocomplete
 
     init() {
         let model = Model(), keyboard = KeyboardBlocker(), displays = Displays(), mic = MicMuter()
-        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites(), obsidian = Obsidian(), quickNotes = QuickNotes(), jiggler = MouseJiggler()
+        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore(), aero = AeroSpace(), favourites = Favourites(), obsidian = Obsidian(), quickNotes = QuickNotes(), jiggler = MouseJiggler(), autocomplete = Autocomplete()
         quickNotes.obsidian = obsidian
         favourites.aero = aero
         LauncherPanel.shared.favourites = favourites
         calendar.onJoin = { [weak mic] in mic?.setMuted(true) }
 
         let palette = CommandSource(.init(model: model, mic: mic, keyboard: keyboard, displays: displays, calendar: calendar,
-                                          snippets: snippets, updater: updater, aero: aero, favourites: favourites, obsidian: obsidian, quickNotes: quickNotes, jiggler: jiggler,
+                                          snippets: snippets, updater: updater, aero: aero, favourites: favourites, obsidian: obsidian, quickNotes: quickNotes, jiggler: jiggler, autocomplete: autocomplete,
                                           openSettings: { NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil) }))
         let schedule = ScheduleSource(calendar: calendar)
         let snippetSearch = SnippetSource(store: snippets)
@@ -72,6 +73,9 @@ struct FanCurveApp: App {
             })
 
         shortcuts.setUpLayoutShortcuts(aero)
+        shortcuts.autocompletePause = ShortcutSetting(key: "acPauseShortcut", id: 7, default: .ctrlOpt(kVK_ANSI_A, "A")) {
+            if autocomplete.enabled { autocomplete.paused.toggle() } else { autocomplete.enabled = true }
+        }
         _model = StateObject(wrappedValue: model)
         _keyboard = StateObject(wrappedValue: keyboard)
         _displays = StateObject(wrappedValue: displays)
@@ -86,12 +90,13 @@ struct FanCurveApp: App {
         _obsidian = StateObject(wrappedValue: obsidian)
         _quickNotes = StateObject(wrappedValue: quickNotes)
         _jiggler = StateObject(wrappedValue: jiggler)
+        _autocomplete = StateObject(wrappedValue: autocomplete)
     }
 
     var body: some Scene {
         MenuBarExtra {
             MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav).environmentObject(updater)
-                .environmentObject(calendar).environmentObject(shortcuts).environmentObject(quickNotes).environmentObject(jiggler)
+                .environmentObject(calendar).environmentObject(shortcuts).environmentObject(quickNotes).environmentObject(jiggler).environmentObject(autocomplete)
         } label: {
             MenuBarLabel(nav: nav) {
                 if keyboard.isOn {
@@ -109,7 +114,7 @@ struct FanCurveApp: App {
                 .environmentObject(brightnessKeys).environmentObject(loginItem).environmentObject(updater)
                 .environmentObject(calendar).environmentObject(snippets).environmentObject(shortcuts).environmentObject(aero)
                 .environmentObject(favourites).environmentObject(obsidian).environmentObject(quickNotes)
-                .environmentObject(jiggler)
+                .environmentObject(jiggler).environmentObject(autocomplete)
         }
         .defaultSize(width: 760, height: 680)
         .windowToolbarStyle(.unified)
@@ -161,6 +166,7 @@ struct MenuContent: View {
     @EnvironmentObject var shortcuts: AppShortcuts
     @EnvironmentObject var quickNotes: QuickNotes
     @EnvironmentObject var jiggler: MouseJiggler
+    @EnvironmentObject var autocomplete: Autocomplete
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -194,6 +200,9 @@ struct MenuContent: View {
         }
         Divider()
         Toggle("Mute microphone\(mic.shortcut.map { "  (\($0.display))" } ?? "")", isOn: Binding(get: { mic.isMuted }, set: { mic.setMuted($0) }))
+        if autocomplete.enabled {
+            Toggle("AI autocomplete", isOn: Binding(get: { !autocomplete.paused }, set: { autocomplete.paused = !$0 }))
+        }
         Toggle("Mouse jiggler (after \(Int(jiggler.idleMinutes)) min idle)", isOn: $jiggler.enabled)
         Toggle("Keyboard cleaning mode", isOn: Binding(get: { keyboard.isOn }, set: { _ in keyboard.toggle() }))
         if keyboard.needsPermission {
@@ -214,13 +223,14 @@ struct MenuContent: View {
 final class AppNav: ObservableObject {
     static let shared = AppNav()
     enum Page: String, CaseIterable, Identifiable {
-        case general, fans, displays, mic, keyboard, awake, calendar, snippets, launcher
-        static let groups: [[Page]] = [[.general], [.fans, .displays, .mic, .keyboard, .awake], [.launcher, .calendar, .snippets]]
+        case general, fans, displays, mic, keyboard, awake, calendar, snippets, autocomplete, launcher
+        static let groups: [[Page]] = [[.general], [.fans, .displays, .mic, .keyboard, .awake], [.launcher, .autocomplete, .calendar, .snippets]]
         var id: String { rawValue }
         var title: String {
             switch self {
             case .general: return "General"
             case .awake: return "Keep Awake"
+            case .autocomplete: return "Autocomplete"
             case .calendar: return "Calendar"
             case .snippets: return "Snippets"
             case .launcher: return "Command Palette"
@@ -234,6 +244,7 @@ final class AppNav: ObservableObject {
             switch self {
             case .general: return "gearshape.fill"
             case .awake: return "cursorarrow.motionlines"
+            case .autocomplete: return "text.cursor"
             case .calendar: return "calendar"
             case .snippets: return "text.quote"
             case .launcher: return "command"
@@ -247,6 +258,7 @@ final class AppNav: ObservableObject {
         var keywords: [String] {
             switch self {
             case .general: return ["login", "startup", "update", "version"]
+            case .autocomplete: return ["ai", "autocomplete", "cotypist", "suggestions", "gemma", "llm", "typing", "model"]
             case .awake: return ["jiggler", "mouse", "awake", "idle", "sleep", "caffeine", "teams", "slack"]
             case .calendar: return ["meeting", "join", "zoom", "schedule", "agenda", "notification"]
             case .snippets: return ["snippet", "text", "expand", "keyword", "abbreviation"]
@@ -261,6 +273,7 @@ final class AppNav: ObservableObject {
             switch self {
             case .general: return .gray
             case .awake: return .green
+            case .autocomplete: return .indigo
             case .calendar: return .red
             case .snippets: return .orange
             case .launcher: return .purple

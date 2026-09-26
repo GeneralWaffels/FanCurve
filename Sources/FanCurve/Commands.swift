@@ -20,6 +20,7 @@ final class CommandSource: PanelSource {
         let obsidian: Obsidian
         let quickNotes: QuickNotes
         let jiggler: MouseJiggler
+        let autocomplete: Autocomplete
         let openSettings: () -> Void
     }
 
@@ -143,6 +144,13 @@ final class CommandSource: PanelSource {
             PanelItem(id: "snippets", section: "FanCurve", title: "Search Snippets", symbol: "text.quote", tint: .orange,
                       keywords: ["snippet", "text", "expand", "paste"]) {
                 LauncherPanel.shared.show(SnippetSource(store: snips)); return true
+            },
+            PanelItem(id: "autocomplete", section: "FanCurve",
+                      title: !d.autocomplete.enabled ? "Turn On AI Autocomplete" : d.autocomplete.paused ? "Resume AI Autocomplete" : "Pause AI Autocomplete",
+                      subtitle: "Local model suggestions as you type", accessory: "⌃⌥A", symbol: "text.cursor", tint: .indigo,
+                      keywords: ["ai", "autocomplete", "suggestions", "cotypist", "typing"]) { [d] in
+                if d.autocomplete.enabled { d.autocomplete.paused.toggle() } else { d.autocomplete.enabled = true }
+                return true
             },
             PanelItem(id: "jiggle", section: "FanCurve", title: d.jiggler.enabled ? "Turn Off Mouse Jiggler" : "Turn On Mouse Jiggler",
                       subtitle: "Keeps the Mac awake after \(Int(d.jiggler.idleMinutes)) min idle", symbol: "cursorarrow.motionlines", tint: .green,
