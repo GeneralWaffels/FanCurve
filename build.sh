@@ -21,6 +21,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>FanCurve shows your upcoming meetings in the menu bar and lets you join video calls in one click.</string>
+  <key>NSCalendarsUsageDescription</key><string>FanCurve shows your upcoming meetings in the menu bar and lets you join video calls in one click.</string>
 </dict></plist>
 PLIST
 codesign --force --sign - "$APP" build/fancurved

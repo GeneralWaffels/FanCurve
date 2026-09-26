@@ -8,6 +8,9 @@ A Macs Fan Control–style fan curve app for Apple Silicon (built and verified o
 - **Global mic mute**: mutes every input device system-wide (hardware mute where available, otherwise input volume 0). It re-applies every second and when devices change, so a headset plugged in while muted is muted too. You set a custom global shortcut (default ⌃⌥M) in the Mic tab. A separate menu bar mic icon can be shown Always, Only while muted, or Never. The mic is unmuted when FanCurve quits.
 - **Brightness keys for external monitors**: the MacBook's brightness keys can control the display under the pointer, or all displays together (Displays → Brightness Keys). Steps match macOS (16 per range, ⌥⇧ for 64), with a glass brightness overlay on the monitor being changed. Needs Accessibility permission.
 - **Open at login** and **in-app updates** (Settings → General): FanCurve checks your `./serve.sh on` server every few hours and installs new versions with the standard administrator password prompt, fan service included.
+- **Command palette** (⌥Space): a Raycast-style launcher. Search apps, FanCurve commands (fan curve, profiles, mute, brightness, cleaning mode), meetings and snippets. It also has a calculator (`23*1.21` → Return copies) and system commands (lock, sleep, screen saver, dark mode).
+- **Calendar**: your next meeting in the menu bar ("Standup · in 12 min"), today's agenda in the menu, **Join next meeting** (⌃⌥J), a schedule panel (⌃⌥C), and notifications with a Join button. It detects Zoom, Meet, Teams, Webex, FaceTime, Whereby, Jitsi and Slack links, and can optionally mute the mic on join. It reads the macOS Calendar app, including Google and Outlook accounts.
+- **Snippets**: type a keyword such as `;date` anywhere and it expands. Placeholders: {clipboard} {date} {time} {datetime} {day} {uuid} {cursor}. Search and paste with ⌃⌥S. Password fields are never touched.
 - **Keyboard cleaning mode**: a switch in the menu bar and the editor window. While it's on, every key press is ignored (including media and brightness keys) but the trackpad keeps working, so you can switch it off again. It turns itself off after 5 minutes. It needs Accessibility permission. The power button and Touch ID can't be blocked.
 - **fancurved**: a small root daemon (launchd) that reads `/Library/Application Support/FanCurve/config.json` every 2 s and drives the fans.
 
@@ -53,7 +56,15 @@ tail -f /var/log/fancurved.log
 | `F0md` | mode: 0 = auto, 1 = manual. Lowercase `md` on this chip; older chips use `F0Md` |
 | `F0Tg` | target RPM (float) |
 
-## Updating your other Macs
+## Releasing updates (GitHub)
+
+```bash
+./release.sh
+```
+
+This builds, pushes, and publishes a GitHub Release with `FanCurve.zip` and its checksum. FanCurve on each Mac checks the repo's latest release every few hours (Settings → General → Software Update). The repo is private, so each Mac needs a fine-grained token with read-only **Contents** access to this repo, stored in the Keychain.
+
+## Updating your other Macs (local network)
 
 Once FanCurve is installed on a Mac, paste the server address into Settings → General → Software Update (`update.sh` already fills it in). After that, FanCurve offers **Install Update** by itself whenever you publish with `./serve.sh on`.
 

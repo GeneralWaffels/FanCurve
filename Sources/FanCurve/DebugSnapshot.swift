@@ -28,6 +28,16 @@ enum DebugSnapshot {
                     }
                 }
             }
+            // The command palette itself: suggestions, then a calculator query.
+            LauncherPanel.shared.keepOpenOnResign = true
+            NotificationCenter.default.post(name: AppDelegate.openPalette, object: nil)
+            for (name, query) in [("palette", ""), ("palette-calc", "23*1.21"), ("palette-search", "fan")] {
+                LauncherPanel.shared.model.query = query
+                try? await Task.sleep(for: .milliseconds(900))
+                if let n = LauncherPanel.shared.windowNumber, let cg = windowImage(n) {
+                    try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent(name + ".png"))
+                }
+            }
             exit(0)
         }
     }

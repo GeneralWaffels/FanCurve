@@ -14,10 +14,16 @@ struct SettingsView: View {
                 if nav.search.isEmpty {
                     SidebarHeader().selectionDisabled()
                 }
-                Section {
-                    ForEach(nav.filteredPages) { page in
-                        Label { Text(page.title) } icon: { IconTile(symbol: page.symbol, tint: page.tint, size: 20) }
-                            .tag(page)
+                // Grouped like System Settings: General / hardware / productivity.
+                ForEach(AppNav.Page.groups, id: \.self) { group in
+                    let pages = nav.filteredPages.filter { group.contains($0) }
+                    if !pages.isEmpty {
+                        Section {
+                            ForEach(pages) { page in
+                                Label { Text(page.title) } icon: { IconTile(symbol: page.symbol, tint: page.tint, size: 20) }
+                                    .tag(page)
+                            }
+                        }
                     }
                 }
             }
@@ -27,6 +33,9 @@ struct SettingsView: View {
             Group {
                 switch nav.page {
                 case .general: GeneralPage()
+                case .calendar: CalendarPage()
+                case .snippets: SnippetsPage()
+                case .launcher: LauncherPage()
                 case .fans: FansPage()
                 case .displays: DisplaysPage()
                 case .mic: MicPage()
@@ -441,7 +450,24 @@ struct GeneralPage: View {
 
             Section {
                 LabeledContent("Current version", value: updater.currentVersion)
-                TextField("Update server", text: $updater.serverURL, prompt: Text("Address from ./serve.sh on"))
+                Picker("Update from", selection: $updater.source) {
+                    ForEach(Updater.Source.allCases) { Text($0.label).tag($0) }
+                }
+                if updater.source == .github {
+                    TextField("Repository", text: $updater.repo, prompt: Text("owner/name"))
+                    LabeledContent("Access token") {
+                        if updater.hasToken {
+                            HStack {
+                                Label("Saved in Keychain", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
+                                Button("Remove") { updater.setToken("") }
+                            }
+                        } else {
+                            TokenField { updater.setToken($0) }
+                        }
+                    }
+                } else {
+                    TextField("Update server", text: $updater.serverURL, prompt: Text("Address from ./serve.sh on"))
+                }
                 LabeledContent {
                     updateAction
                 } label: {
@@ -450,7 +476,9 @@ struct GeneralPage: View {
             } header: {
                 Text("Software Update")
             } footer: {
-                Footer("Paste the address that ./serve.sh on prints on the Mac you build FanCurve on. FanCurve checks it quietly every few hours, and installing asks for your administrator password because the fan service is updated too.")
+                Footer(updater.source == .github
+                       ? "Publish a new version with ./release.sh on the Mac you build FanCurve on. Your repository is private, so FanCurve needs a fine-grained GitHub token with read-only access to Contents for this repository (github.com → Settings → Developer settings → Fine-grained tokens). It's kept in your Keychain. Installing asks for your administrator password because the fan service is updated too."
+                       : "Paste the address that ./serve.sh on prints on the Mac you build FanCurve on. Installing asks for your administrator password because the fan service is updated too.")
             }
         }
         .formStyle(.grouped)
@@ -459,7 +487,7 @@ struct GeneralPage: View {
 
     @ViewBuilder private var updateStatus: some View {
         switch updater.state {
-        case .idle: StatusRow(text: updater.serverURL.isEmpty ? "No update server set." : "Not checked yet.", color: .secondary)
+        case .idle: StatusRow(text: updater.isConfigured ? "Not checked yet." : "Not set up yet.", color: .secondary)
         case .checking: StatusRow(text: "Checking…", color: .secondary)
         case .upToDate: StatusRow(text: "FanCurve is up to date.", color: .green)
         case .available(let v): StatusRow(text: "Version \(v) is available.", color: .blue)
@@ -473,7 +501,21 @@ struct GeneralPage: View {
         switch updater.state {
         case .available: Button("Install Update") { updater.install() }.buttonStyle(.borderedProminent)
         case .checking, .downloading, .installing: ProgressView().controlSize(.small)
-        default: Button("Check Now") { updater.check(userInitiated: true) }.disabled(updater.serverURL.isEmpty)
+        default: Button("Check Now") { updater.check(userInitiated: true) }.disabled(!updater.isConfigured)
+        }
+    }
+}
+
+/// Secure token entry with its own draft state (the Command Line Tools can't expand SwiftUI's @State macro).
+struct TokenField: View {
+    let save: (String) -> Void
+    @StateObject private var draft = Draft()
+    final class Draft: ObservableObject { @Published var text = "" }
+
+    var body: some View {
+        HStack {
+            SecureField("Access token", text: $draft.text, prompt: Text("github_pat_…")).labelsHidden().frame(width: 220)
+            Button("Save") { save(draft.text); draft.text = "" }.disabled(draft.text.isEmpty)
         }
     }
 }

@@ -1,9 +1,11 @@
+import Carbon.HIToolbox
 import SwiftUI
 import SMCKit
 
 /// Opening FanCurve again (Finder, Spotlight, Dock) while it's running shows Settings.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static let openSettings = Notification.Name("FanCurveOpenSettings")
+    static let openPalette = Notification.Name("FanCurveOpenPalette")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
@@ -20,24 +22,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct FanCurveApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model = Model()
-    @StateObject private var keyboard = KeyboardBlocker()
+    @StateObject private var model: Model
+    @StateObject private var keyboard: KeyboardBlocker
     @StateObject private var displays: Displays
     @StateObject private var brightnessKeys: BrightnessKeys
-    @StateObject private var mic = MicMuter()
+    @StateObject private var mic: MicMuter
     @StateObject private var nav = AppNav.shared
     @StateObject private var loginItem = LoginItem()
-    @StateObject private var updater = Updater()
+    @StateObject private var updater: Updater
+    @StateObject private var calendar: CalendarStore
+    @StateObject private var snippets: SnippetStore
+    @StateObject private var shortcuts: AppShortcuts
 
     init() {
-        let d = Displays()
-        _displays = StateObject(wrappedValue: d)
-        _brightnessKeys = StateObject(wrappedValue: BrightnessKeys(displays: d))
+        let model = Model(), keyboard = KeyboardBlocker(), displays = Displays(), mic = MicMuter()
+        let updater = Updater(), calendar = CalendarStore(), snippets = SnippetStore()
+        calendar.onJoin = { [weak mic] in mic?.setMuted(true) }
+
+        let palette = CommandSource(.init(model: model, mic: mic, keyboard: keyboard, displays: displays, calendar: calendar,
+                                          snippets: snippets, updater: updater,
+                                          openSettings: { NotificationCenter.default.post(name: AppDelegate.openSettings, object: nil) }))
+        let schedule = ScheduleSource(calendar: calendar)
+        let snippetSearch = SnippetSource(store: snippets)
+        NotificationCenter.default.addObserver(forName: AppDelegate.openPalette, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { LauncherPanel.shared.show(palette) }
+        }
+        let shortcuts = AppShortcuts(
+            palette: ShortcutSetting(key: "paletteShortcut", id: 5,
+                                     default: Shortcut(keyCode: 49, modifiers: UInt32(optionKey), display: "⌥Space")) {
+                LauncherPanel.shared.toggle(palette)
+            },
+            joinMeeting: ShortcutSetting(key: "joinShortcut", id: 2, default: .ctrlOpt(kVK_ANSI_J, "J")) { calendar.join() },
+            schedule: ShortcutSetting(key: "scheduleShortcut", id: 3, default: .ctrlOpt(kVK_ANSI_C, "C")) {
+                LauncherPanel.shared.toggle(schedule)
+            },
+            snippets: ShortcutSetting(key: "snippetShortcut", id: 4, default: .ctrlOpt(kVK_ANSI_S, "S")) {
+                LauncherPanel.shared.toggle(snippetSearch)
+            })
+
+        _model = StateObject(wrappedValue: model)
+        _keyboard = StateObject(wrappedValue: keyboard)
+        _displays = StateObject(wrappedValue: displays)
+        _brightnessKeys = StateObject(wrappedValue: BrightnessKeys(displays: displays))
+        _mic = StateObject(wrappedValue: mic)
+        _updater = StateObject(wrappedValue: updater)
+        _calendar = StateObject(wrappedValue: calendar)
+        _snippets = StateObject(wrappedValue: snippets)
+        _shortcuts = StateObject(wrappedValue: shortcuts)
     }
 
     var body: some Scene {
         MenuBarExtra {
             MenuContent().environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav).environmentObject(updater)
+                .environmentObject(calendar).environmentObject(shortcuts)
         } label: {
             MenuBarLabel(nav: nav) {
                 if keyboard.isOn {
@@ -53,6 +90,7 @@ struct FanCurveApp: App {
             SettingsView()
                 .environmentObject(model).environmentObject(keyboard).environmentObject(displays).environmentObject(mic).environmentObject(nav)
                 .environmentObject(brightnessKeys).environmentObject(loginItem).environmentObject(updater)
+                .environmentObject(calendar).environmentObject(snippets).environmentObject(shortcuts)
         }
         .defaultSize(width: 760, height: 680)
         .windowToolbarStyle(.unified)
@@ -63,6 +101,14 @@ struct FanCurveApp: App {
             MicMenu().environmentObject(mic).environmentObject(nav)
         } label: {
             Image(systemName: mic.isMuted ? "mic.slash.fill" : "mic.fill")
+        }
+
+        // Next meeting ("Standup · in 12 min"); visibility follows Settings → Calendar → Menu Bar.
+        MenuBarExtra(isInserted: $calendar.showInMenuBar) {
+            MeetingMenu().environmentObject(calendar).environmentObject(nav).environmentObject(shortcuts)
+        } label: {
+            Label(calendar.menuBarTitle, systemImage: calendar.next?.isOngoing(at: calendar.now) == true ? "video.fill" : "calendar")
+                .labelStyle(.titleAndIcon)
         }
     }
 
@@ -92,11 +138,19 @@ struct MenuContent: View {
     @EnvironmentObject var mic: MicMuter
     @EnvironmentObject var nav: AppNav
     @EnvironmentObject var updater: Updater
+    @EnvironmentObject var calendar: CalendarStore
+    @EnvironmentObject var shortcuts: AppShortcuts
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         if let v = updater.availableVersion {
             Button("Install Update (\(v))…") { updater.install() }
+            Divider()
+        }
+        if calendar.hasAccess, !calendar.upcomingToday.isEmpty {
+            Section("Today") {
+                ForEach(calendar.upcomingToday.prefix(3)) { m in MeetingMenuItem(meeting: m) }
+            }
             Divider()
         }
         Text("CPU \(fmt(model.temps[.cpuMax]))  ·  GPU \(fmt(model.temps[.gpuMax]))")
@@ -124,6 +178,9 @@ struct MenuContent: View {
             Button("Grant Accessibility access…") { keyboard.openAccessibilitySettings() }
         }
         Divider()
+        Button("Command Palette\(shortcuts.palette.shortcut.map { "  (\($0.display))" } ?? "")") {
+            NotificationCenter.default.post(name: AppDelegate.openPalette, object: nil)
+        }
         Button("Settings…") { nav.openSettings(openWindow) }.keyboardShortcut(",")
         Button("Quit FanCurve") { NSApp.terminate(nil) }.keyboardShortcut("q")
     }
@@ -134,11 +191,15 @@ struct MenuContent: View {
 final class AppNav: ObservableObject {
     static let shared = AppNav()
     enum Page: String, CaseIterable, Identifiable {
-        case general, fans, displays, mic, keyboard
+        case general, fans, displays, mic, keyboard, calendar, snippets, launcher
+        static let groups: [[Page]] = [[.general], [.fans, .displays, .mic, .keyboard], [.launcher, .calendar, .snippets]]
         var id: String { rawValue }
         var title: String {
             switch self {
             case .general: return "General"
+            case .calendar: return "Calendar"
+            case .snippets: return "Snippets"
+            case .launcher: return "Command Palette"
             case .fans: return "Fans"
             case .displays: return "Displays"
             case .mic: return "Microphone"
@@ -148,6 +209,9 @@ final class AppNav: ObservableObject {
         var symbol: String {
             switch self {
             case .general: return "gearshape.fill"
+            case .calendar: return "calendar"
+            case .snippets: return "text.quote"
+            case .launcher: return "command"
             case .fans: return "fan.fill"
             case .displays: return "display"
             case .mic: return "mic.fill"
@@ -158,6 +222,9 @@ final class AppNav: ObservableObject {
         var keywords: [String] {
             switch self {
             case .general: return ["login", "startup", "update", "version"]
+            case .calendar: return ["meeting", "join", "zoom", "schedule", "agenda", "notification"]
+            case .snippets: return ["snippet", "text", "expand", "keyword", "abbreviation"]
+            case .launcher: return ["palette", "launcher", "raycast", "search", "apps", "calculator"]
             case .fans: return ["curve", "temperature", "profile", "noctua", "rpm", "cooling"]
             case .displays: return ["brightness", "monitor", "ddc", "light sensor", "keys"]
             case .mic: return ["mute", "shortcut", "microphone", "hotkey"]
@@ -167,6 +234,9 @@ final class AppNav: ObservableObject {
         var tint: Color {
             switch self {
             case .general: return .gray
+            case .calendar: return .red
+            case .snippets: return .orange
+            case .launcher: return .purple
             case .fans: return .blue
             case .displays: return .indigo
             case .mic: return .red
@@ -201,6 +271,50 @@ final class AppNav: ObservableObject {
 }
 
 /// Menu for the separate mic status icon.
+/// A meeting row in a menu: joins if it has a call link, otherwise opens it in Calendar.
+struct MeetingMenuItem: View {
+    let meeting: Meeting
+    @EnvironmentObject var calendar: CalendarStore
+
+    var body: some View {
+        let m = meeting
+        let time = m.isOngoing(at: calendar.now) ? "Now" : m.start.formatted(date: .omitted, time: .shortened)
+        Button { calendar.join(m) } label: {
+            Label("\(time)   \(m.title)" + (m.link != nil ? "  — Join" : ""), systemImage: m.link != nil ? "video.fill" : "calendar")
+        }
+    }
+}
+
+/// Menu for the next-meeting menu bar entry.
+struct MeetingMenu: View {
+    @EnvironmentObject var calendar: CalendarStore
+    @EnvironmentObject var nav: AppNav
+    @EnvironmentObject var shortcuts: AppShortcuts
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        if let m = calendar.joinable, m.link != nil {
+            Button("Join \(m.title)\(shortcuts.joinMeeting.shortcut.map { "  (\($0.display))" } ?? "")") { calendar.join(m) }
+            Divider()
+        }
+        Section("Today") {
+            if calendar.upcomingToday.isEmpty { Text("No more meetings today") }
+            ForEach(calendar.upcomingToday) { m in MeetingMenuItem(meeting: m) }
+        }
+        let tomorrow = calendar.meetings.filter { !$0.isAllDay && !calendar.isToday($0) }
+        if !tomorrow.isEmpty {
+            Section("Tomorrow") {
+                ForEach(tomorrow.prefix(4)) { m in MeetingMenuItem(meeting: m) }
+            }
+        }
+        Divider()
+        Button("Show Schedule\(shortcuts.schedule.shortcut.map { "  (\($0.display))" } ?? "")") {
+            LauncherPanel.shared.show(ScheduleSource(calendar: calendar))
+        }
+        Button("Settings…") { nav.page = .calendar; nav.openSettings(openWindow) }
+    }
+}
+
 struct MicMenu: View {
     @EnvironmentObject var mic: MicMuter
     @EnvironmentObject var nav: AppNav
