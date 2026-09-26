@@ -66,7 +66,7 @@ A Raycast-style glass search panel:
 - **Calculator:** type `23*1.21`, and pressing Return copies the answer.
 - **FanCurve commands:** turn the fan curve on or off, switch profiles, mute the mic, set external brightness, keyboard cleaning mode.
 - **System commands:** lock screen, sleep, screen saver, toggle dark mode.
-- **Quick Notes (⌃⌥N):** a floating scratchpad like Raycast Notes. Type in the palette and choose *New Quick Note*, or press the shortcut. Notes save as you type, and you can search them from the palette or move one into Obsidian with a click.
+- **Quick Notes:** jot something down straight from the palette (see below).
 - **Spotlight file search** inside the palette, useful when ⌘Space belongs to the palette.
 - **[Obsidian](https://obsidian.md) integration**, like Raycast's Obsidian extension:
   - **Search notes** by title or by text, with a snippet showing the match.
@@ -83,6 +83,22 @@ A Raycast-style glass search panel:
   &nbsp;
   <img src="docs/screenshots/palette-aerospace.png" width="420" alt="AeroSpace commands in the command palette">
 </p>
+
+<p align="center">
+  <img src="docs/screenshots/palette-obsidian.png" width="420" alt="Obsidian commands in the command palette">
+  &nbsp;
+  <img src="docs/screenshots/palette-files.png" width="420" alt="Spotlight file search in the command palette">
+</p>
+
+### Quick Notes (⌃⌥N)
+
+<p align="center">
+  <img src="docs/screenshots/quick-notes.png" width="560" alt="Quick Notes floating window with a note list and editor">
+</p>
+
+- **Floating scratchpad** like Raycast Notes: a note list beside a distraction-free editor, saved as you type, and optionally kept on top.
+- **Create from the palette:** type anything and choose *New Quick Note*, or search your notes with *Search Quick Notes*.
+- **Move to Obsidian:** one click moves a note into your vault's `Notes/` folder when it's worth keeping.
 
 ### Calendar and meetings
 
