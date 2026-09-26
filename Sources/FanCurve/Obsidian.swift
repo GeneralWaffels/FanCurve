@@ -48,7 +48,7 @@ final class Obsidian: ObservableObject {
     private func save(_ key: String, _ value: String) { UserDefaults.standard.set(value, forKey: key) }
 
     private func loadVaultSettings() {
-        dailyPattern = UserDefaults.standard.string(forKey: dailyKey) ?? Self.dailyFromCorePlugin(vaultPath) ?? ""
+        dailyPattern = Self.dailyFromCorePlugin(vaultPath) ?? UserDefaults.standard.string(forKey: dailyKey) ?? ""
         newNoteFolder = UserDefaults.standard.string(forKey: "obsNewFolder:" + vaultPath) ?? ""
     }
 
@@ -64,19 +64,33 @@ final class Obsidian: ObservableObject {
         .sorted { ($0.open ? 0 : 1, $0.vault.name) < ($1.open ? 0 : 1, $1.vault.name) }
     }
 
+    /// Obsidian's Daily Notes template path, if one is configured (e.g. "Templates/Daily").
+    private var dailyTemplate: String? {
+        let url = URL(fileURLWithPath: vaultPath).appendingPathComponent(".obsidian/daily-notes.json")
+        guard let d = try? Data(contentsOf: url), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let t = j["template"] as? String, !t.isEmpty else { return nil }
+        return t.hasSuffix(".md") ? t : t + ".md"
+    }
+
+    /// True when the daily format comes from Obsidian's own Daily Notes settings.
+    var dailyFromObsidian: Bool { Self.dailyFromCorePlugin(vaultPath) != nil }
+
     /// Daily note pattern from the core Daily Notes plugin, if configured.
     private static func dailyFromCorePlugin(_ vault: String) -> String? {
         let url = URL(fileURLWithPath: vault).appendingPathComponent(".obsidian/daily-notes.json")
         guard let d = try? Data(contentsOf: url), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return nil }
         let folder = (j["folder"] as? String ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let format = (j["format"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "YYYY-MM-DD"
-        return folder.isEmpty ? format : folder + "/" + format
+        // Folder names are literal text (e.g. "Daily" would otherwise read as a day-of-month token).
+        let literal = folder.split(separator: "/").map { "[" + $0 + "]" }.joined(separator: "/")
+        return folder.isEmpty ? format : literal + "/" + format
     }
 
     // MARK: index
 
     /// Rebuilds the note index in the background (at most once a minute unless forced).
     func reindex(force: Bool = false) {
+        reloadVaults()
         guard !vaultPath.isEmpty, !indexing else { return }
         if !force, let t = lastIndex, Date().timeIntervalSince(t) < 60 { return }
         indexing = true
@@ -199,8 +213,12 @@ final class Obsidian: ObservableObject {
         guard !line.isEmpty, let path = dailyPath() else { NSSound.beep(); return }
         ensureDaily(path)
         let stamp = timestampAppends ? Date().formatted(date: .omitted, time: .shortened) + " " : ""
-        // Read+write handle and Swift's throwing APIs: the legacy read/write calls raise
-        // Objective-C exceptions (uncatchable in Swift) on errors.
+        append("- " + stamp + line, to: path)
+    }
+
+    /// Appends one line at the end of a note (adding a newline first if the file doesn't end with one).
+    /// Read+write handle and Swift's throwing APIs: the legacy calls raise uncatchable ObjC exceptions.
+    private func append(_ line: String, to path: String) {
         guard let h = FileHandle(forUpdatingAtPath: path) else { NSSound.beep(); return }
         defer { try? h.close() }
         do {
@@ -211,7 +229,7 @@ final class Obsidian: ObservableObject {
                 if try h.read(upToCount: 1) != Data("\n".utf8) { prefix = "\n" }
                 try h.seekToEnd()
             }
-            try h.write(contentsOf: Data((prefix + "- " + stamp + line + "\n").utf8))
+            try h.write(contentsOf: Data((prefix + line + "\n").utf8))
         } catch {
             NSSound.beep()
         }
@@ -221,7 +239,33 @@ final class Obsidian: ObservableObject {
     private func ensureDaily(_ path: String) {
         guard !FileManager.default.fileExists(atPath: path) else { return }
         try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        FileManager.default.createFile(atPath: path, contents: Data())
+        var text = ""
+        if let t = dailyTemplate, let tpl = try? String(contentsOfFile: vaultPath + "/" + t, encoding: .utf8) {
+            let now = Date()
+            text = tpl.replacingOccurrences(of: "{{date}}", with: MomentFormat.format("YYYY-MM-DD", now))
+                .replacingOccurrences(of: "{{time}}", with: now.formatted(date: .omitted, time: .shortened))
+                .replacingOccurrences(of: "{{title}}", with: ((path as NSString).lastPathComponent as NSString).deletingPathExtension)
+        }
+        FileManager.default.createFile(atPath: path, contents: Data(text.utf8))
+    }
+
+    /// Adds "- [ ] text" to Inbox.md (the vault's capture note) or, without one, today's daily note.
+    func addTask(_ text: String) {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty, !vaultPath.isEmpty else { NSSound.beep(); return }
+        let inbox = vaultPath + "/Inbox.md"
+        let target = FileManager.default.fileExists(atPath: inbox) ? inbox : dailyPath()
+        guard let target else { NSSound.beep(); return }
+        if target != inbox { ensureDaily(target) }
+        append("- [ ] " + t, to: target)
+    }
+
+    /// Where Add Task writes, for display.
+    var taskTarget: String { FileManager.default.fileExists(atPath: vaultPath + "/Inbox.md") ? "Inbox" : "today's daily note" }
+
+    func reloadVaults() {
+        let list = Self.readVaults().map(\.vault)
+        if list != vaults { vaults = list }
     }
 
     /// Finds a recent daily note in any common date format and turns its path into a pattern,
@@ -299,6 +343,8 @@ final class ObsidianSource: PanelSource {
         var items: [PanelItem] = []
         let tint = Color.purple
         if !q.isEmpty {
+            items.append(PanelItem(id: "obs.task", section: "Capture", title: "Add Task",
+                                   subtitle: "“\(q)” → \(obs.taskTarget)", symbol: "checkmark.circle", tint: tint) { [obs] in obs.addTask(q); return true })
             items.append(PanelItem(id: "obs.append", section: "Capture", title: "Append to Daily Note",
                                    subtitle: "“\(q)”", symbol: "text.append", tint: tint) { [obs] in obs.appendToDaily(q); return true })
             items.append(PanelItem(id: "obs.create", section: "Capture", title: "Create Note “\(q)”",
@@ -331,7 +377,11 @@ final class ObsidianSource: PanelSource {
                       symbol: "books.vertical.fill", tint: tint, keywords: ["obsidian", "vault"]) { obs.openVault(); return true },
             PanelItem(id: "obs.random", section: "Obsidian", title: "Open Random Note", symbol: "shuffle", tint: tint,
                       keywords: ["obsidian", "random", "note"]) { obs.openRandom(); return true },
-        ]
+        ] + obs.vaults.filter { $0.path != obs.vaultPath }.map { v in
+            PanelItem(id: "obs.switch." + v.path, section: "Obsidian", title: "Switch to \(v.name)",
+                      subtitle: "Search and capture in this vault instead", symbol: "arrow.left.arrow.right", tint: tint,
+                      keywords: ["obsidian", "vault", "switch", v.name]) { obs.vaultPath = v.path; return false }
+        }
     }
 }
 
@@ -350,6 +400,8 @@ struct ObsidianSection: View {
                 }
                 TextField("Daily note format", text: $obs.dailyPattern, prompt: Text("e.g. Daily/YYYY-MM-DD"))
                     .font(.body.monospaced())
+                    .disabled(obs.dailyFromObsidian)
+                    .help(obs.dailyFromObsidian ? "Set in Obsidian → Settings → Daily notes" : "")
                 LabeledContent("Today's daily note") {
                     if let p = obs.dailyPath() {
                         HStack(spacing: 6) {
