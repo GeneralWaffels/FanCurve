@@ -26,24 +26,29 @@ struct ProfileMenu: View {
     }
 }
 
-/// Save / Delete buttons for the Fans page. Delete removes the selected saved profile; built-in
-/// Noctua presets can't be deleted, so the button is disabled for them.
+/// Save / Rename / Delete buttons shown above the fan curve. Rename and Delete act on the
+/// selected saved profile; built-in Noctua presets and unsaved curves can't be renamed or deleted.
 struct ProfileButtons: View {
     @EnvironmentObject var model: Model
 
     var body: some View {
         let active = model.activeProfile
-        let deletable = active.map { !model.isBuiltIn($0) } ?? false
+        let editable = active.map { !model.isBuiltIn($0) } ?? false
+        let why = active == nil ? "Save this curve as a profile first" : "Built-in profiles can't be changed"
         HStack(spacing: 8) {
-            Button { ProfileDialogs.save(model) } label: { Label("Save as Profile…", systemImage: "square.and.arrow.down") }
+            Button { ProfileDialogs.save(model) } label: { Label("Save as…", systemImage: "square.and.arrow.down") }
                 .help("Save the current curve as a named profile")
+            Button { if let a = active { ProfileDialogs.rename(a, model) } } label: { Label("Rename…", systemImage: "pencil") }
+                .disabled(!editable)
+                .help(editable ? "Rename \u{201C}\(active!)\u{201D}" : why)
             Button(role: .destructive) { if let a = active { ProfileDialogs.delete(a, model) } } label: {
-                Label("Delete Profile", systemImage: "trash")
+                Label("Delete", systemImage: "trash")
             }
-            .disabled(!deletable)
-            .help(deletable ? "Delete \u{201C}\(active!)\u{201D}" : active == nil ? "Select a saved profile to delete it" : "Built-in profiles can't be deleted")
+            .disabled(!editable)
+            .help(editable ? "Delete \u{201C}\(active!)\u{201D}" : why)
         }
         .labelStyle(.titleAndIcon)
+        .controlSize(.regular)
     }
 }
 
@@ -75,6 +80,25 @@ enum ProfileDialogs {
         if model.customProfiles[name] != nil,
            !confirm("Replace “\(name)”?", "A profile with this name already exists.", button: "Replace") { return }
         model.saveProfile(named: name)
+    }
+
+    static func rename(_ name: String, _ model: Model) {
+        NSApp.activate(ignoringOtherApps: true)
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        field.stringValue = name
+        let alert = NSAlert()
+        alert.messageText = "Rename \u{201C}\(name)\u{201D}"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let new = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !new.isEmpty, new != name else { return }
+        if model.isBuiltIn(new) { info("\u{201C}\(new)\u{201D} is a built-in profile", "Pick a different name."); return }
+        if model.customProfiles[new] != nil,
+           !confirm("Replace \u{201C}\(new)\u{201D}?", "A profile with this name already exists.", button: "Replace") { return }
+        model.renameProfile(name, to: new)
     }
 
     static func delete(_ name: String, _ model: Model) {

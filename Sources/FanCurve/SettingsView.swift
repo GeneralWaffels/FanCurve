@@ -217,16 +217,20 @@ struct FansPage: View {
                     ForEach(TempSource.allCases) { Text($0.label).tag($0) }
                 }
                 LabeledContent("Profile") { ProfileMenu().fixedSize() }
-                LabeledContent {
-                    ProfileButtons()
-                } label: {
-                    Text(profileHint).foregroundStyle(.secondary).font(.callout)
-                }
             } footer: {
                 daemonFooter
             }
 
             Section {
+                // Profile actions sit directly above the curve they apply to.
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(model.activeProfile ?? "Custom curve").font(.headline)
+                        Text(profileHint).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    ProfileButtons()
+                }
                 CurveEditor(points: $model.config.points, currentTemp: model.currentTemp, fanMin: model.fanMin, fanMax: model.fanMax)
                     .frame(height: 300)
                     .padding(.vertical, 6)
@@ -262,8 +266,8 @@ struct FansPage: View {
     }
 
     private var profileHint: String {
-        guard let a = model.activeProfile else { return "This curve isn't saved yet." }
-        return model.isBuiltIn(a) ? "Built-in profile" : "Saved profile"
+        guard let a = model.activeProfile else { return "Not saved as a profile yet" }
+        return model.isBuiltIn(a) ? "Built-in profile" : "Your profile"
     }
 
     private var curveSummary: String {

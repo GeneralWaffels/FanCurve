@@ -94,6 +94,13 @@ final class Model: ObservableObject {
         persistProfiles()
     }
 
+    func renameProfile(_ old: String, to new: String) {
+        guard old != new, let points = customProfiles[old] else { return }
+        customProfiles[new] = points
+        customProfiles[old] = nil
+        persistProfiles()
+    }
+
     func deleteProfile(named name: String) {
         customProfiles[name] = nil
         persistProfiles()
