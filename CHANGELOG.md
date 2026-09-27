@@ -5,7 +5,7 @@ FanCurve uses date-based versions (`YYYY.MM.DD.HHMM`). See [Releases](../../rele
 ## 2026-09-27
 
 ### Added
-- **Puget Systems fan preset:** 30 °C 25%, 55 °C 35%, 70 °C 50%, 80 °C 75%, 90 °C 100%.
+- **Puget Systems fan preset:** flat at 25% up to 45 °C, then 64 °C 35%, 75 °C 50%, 83 °C 75%, 90 °C 100%.
 - **Download a model from Settings:** a one-click Gemma 4 E2B download from Hugging Face (Google's official build or Unsloth's Q4_K_M), with progress, a free-space check and SHA-256 verification.
 
 ### Changed

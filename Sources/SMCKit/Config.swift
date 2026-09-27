@@ -49,10 +49,10 @@ public struct FanConfig: Codable, Equatable {
         "Noctua Quiet": [.init(temp: 40, rpm: 2350), .init(temp: 60, rpm: 3150), .init(temp: 80, rpm: 3900), .init(temp: 90, rpm: 5500), .init(temp: 95, rpm: 7826)],
         "Noctua Balanced": [.init(temp: 40, rpm: 2350), .init(temp: 50, rpm: 3150), .init(temp: 60, rpm: 3900), .init(temp: 80, rpm: 5500), .init(temp: 95, rpm: 7826)],
         "Noctua Performance": [.init(temp: 40, rpm: 2350), .init(temp: 50, rpm: 3500), .init(temp: 60, rpm: 4700), .init(temp: 80, rpm: 6250), .init(temp: 90, rpm: 7826)],
-        // Puget Systems-style BIOS curve (Gigabyte Smart Fan 5): 0 °C 0%, 30 °C 25%, 55 °C 35%, 70 °C 50%,
-        // 80 °C 75%, 90 °C 100%, on the same 7826 rpm scale. 25% is below the fans' minimum, so they
-        // stay off until ~42 °C.
-        "Puget Systems": [.init(temp: 0, rpm: 0), .init(temp: 30, rpm: 1957), .init(temp: 55, rpm: 2739), .init(temp: 70, rpm: 3913), .init(temp: 80, rpm: 5870), .init(temp: 90, rpm: 7826)],
+        // Puget Systems-style BIOS curve (Gigabyte Smart Fan 5: 25/35/50/75/100%), held flat at 25% up to
+        // 45 °C and its arc compressed into 45–90 °C, on the same 7826 rpm scale. 25% is below the fans'
+        // minimum, so the flat part keeps them off; they start around 54 °C.
+        "Puget Systems": [.init(temp: 30, rpm: 1957), .init(temp: 45, rpm: 1957), .init(temp: 64, rpm: 2739), .init(temp: 75, rpm: 3913), .init(temp: 83, rpm: 5870), .init(temp: 90, rpm: 7826)],
     ]
 
     /// The laptop-tweaked Noctua curves shipped before 2026-09-27 (fans-off zone), mapped to their

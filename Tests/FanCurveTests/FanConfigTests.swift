@@ -43,11 +43,12 @@ struct FanConfigTests {
     @Test func pugetCurveMatchesItsBiosPoints() throws {
         var c = FanConfig()
         c.points = try #require(FanConfig.presets["Puget Systems"])
-        #expect(abs(c.rpm(at: 55) / 7826 - 0.35) < 0.001)
-        #expect(abs(c.rpm(at: 80) / 7826 - 0.75) < 0.001)
+        #expect(c.rpm(at: 20) == c.rpm(at: 45), "flat until 45 °C")
+        #expect(abs(c.rpm(at: 64) / 7826 - 0.35) < 0.001)
+        #expect(abs(c.rpm(at: 83) / 7826 - 0.75) < 0.001)
         #expect(c.rpm(at: 90) == 7826)
         let start = try #require(c.startTemp(fanMin: 2317))
-        #expect(start > 41 && start < 43, "25% is below the fans' minimum, so they start around 42 °C")
+        #expect(start > 53 && start < 55, "25% is below the fans' minimum, so they start around 54 °C")
     }
 
     @Test func legacyPresetsKeepTheirNames() {
