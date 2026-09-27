@@ -82,7 +82,7 @@ A Raycast-style glass search panel:
   - **Tiling and layouts:** toggle tiling, change layout, float, fullscreen, balance.
   - **Workspaces:** jump to one (each is listed with the apps in it), or move the focused window there.
   - **Windows:** focus any window.
-  - **Sizes and layouts:** set the focused window to ½, ⅓, ¼, ⅔ or ¾ of the screen width. Presets: *Half + Two Quarters (stacked)* and *Half + Two Quarter Columns*.
+  - **Sizes and layouts:** set the focused window to ½, ⅓, ¼, ⅔ or ¾ of the screen width. Presets: *Half + Two Quarters (stacked)* and *Half + Two Quarter Columns*. [How it works →](docs/aerospace-integration.md)
   - **Settings:** gaps, start at login and default layout. These edit `~/.aerospace.toml` in place and reload AeroSpace.
 
 <p align="center">
