@@ -9,7 +9,10 @@ struct ProfileMenu: View {
     var body: some View {
         Menu(model.activeProfile ?? "Custom (unsaved)") {
             Section("Noctua") {
-                ForEach(FanConfig.presetOrder, id: \.self) { name in item(name) }
+                ForEach(FanConfig.presetOrder.filter { $0.hasPrefix("Noctua") }, id: \.self) { name in item(name) }
+            }
+            Section("Puget Systems") {
+                ForEach(FanConfig.presetOrder.filter { !$0.hasPrefix("Noctua") }, id: \.self) { name in item(name) }
             }
             if !model.customProfileNames.isEmpty {
                 Section("Your profiles") {

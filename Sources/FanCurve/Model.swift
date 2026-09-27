@@ -21,10 +21,18 @@ final class Model: ObservableObject {
     init() {
         hw = try? Hardware()
         config = Paths.loadConfig()
+        // Curves saved from the old laptop-tweaked Noctua presets move to the restored originals.
+        let current = config.points.sorted { $0.temp < $1.temp }
+        var migrated = false
+        if let old = FanConfig.legacyPresets.first(where: { $0.value == current }), let new = FanConfig.presets[old.key] {
+            config.points = new
+            migrated = true
+        }
         if let d = UserDefaults.standard.data(forKey: "customProfiles"),
            let p = try? JSONDecoder().decode([String: [CurvePoint]].self, from: d) { customProfiles = p }
         refresh()
         startTimer()
+        if migrated { scheduleSave() }   // didSet doesn't run in init; tell the fan service
     }
 
     /// 1 s updates while the Fans page is on screen (live curve marker), 3 s otherwise

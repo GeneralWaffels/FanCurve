@@ -44,7 +44,7 @@ FanCurve is a native macOS menu bar app written in Swift and SwiftUI. Its core i
 
 - **Drag-and-drop fan curve.** Drag points to shape it, double-click to add a point, right-click to remove one. A live marker shows where you are on the curve right now.
 - **Follows the temperature you choose:** hottest CPU core, CPU average, GPU, or whichever of CPU and GPU is hotter. It reads the SMC's per-core sensors (73 CPU and 42 GPU sensors on an M5 Pro).
-- **Noctua-based presets:** Quiet, Balanced and Performance, adapted from Noctua's published example curves for a laptop. Below the fans' minimum speed, macOS keeps them switched off, so your Mac stays silent when idle.
+- **Presets:** Noctua Quiet, Balanced and Performance use Noctua's published example curves as-is (including their 30% minimum, so the fans keep turning), mapped onto the MacBook's fan range. **Puget Systems** is a BIOS-style curve (25% at 30 °C up to 100% at 90 °C) that leaves the fans off until about 42 °C.
 - **Your own profiles:** save the current curve by name, and switch profiles from the menu bar or the command palette.
 - **Built to stay quiet and safe:**
   - **Smoothing** evens out the temperature so short spikes don't move the fans.

@@ -41,12 +41,23 @@ public struct FanConfig: Codable, Equatable {
         stride(from: 20.0, through: 110, by: 0.1).first { rpm(at: $0) >= fanMin }
     }
 
-    public static let presetOrder = ["Noctua Quiet", "Noctua Balanced", "Noctua Performance"]
+    public static let presetOrder = ["Noctua Quiet", "Noctua Balanced", "Noctua Performance", "Puget Systems"]
 
     public static let presets: [String: [CurvePoint]] = [
         // Noctua's Antec Flux Pro Noctua Edition curves (noctua.at, Mar 2026), PWM % mapped onto the
-        // M5 Pro's 7826 rpm max. Laptop tweak: Noctua's 30% idle floor is replaced by a fans-off zone
-        // (0 rpm point), so fans kick in at ~59 / ~53 / ~48 °C and stay on until 3 °C below that.
+        // M5 Pro's 7826 rpm max, including Noctua's 30% floor (~2350 rpm), so the fans keep turning.
+        "Noctua Quiet": [.init(temp: 40, rpm: 2350), .init(temp: 60, rpm: 3150), .init(temp: 80, rpm: 3900), .init(temp: 90, rpm: 5500), .init(temp: 95, rpm: 7826)],
+        "Noctua Balanced": [.init(temp: 40, rpm: 2350), .init(temp: 50, rpm: 3150), .init(temp: 60, rpm: 3900), .init(temp: 80, rpm: 5500), .init(temp: 95, rpm: 7826)],
+        "Noctua Performance": [.init(temp: 40, rpm: 2350), .init(temp: 50, rpm: 3500), .init(temp: 60, rpm: 4700), .init(temp: 80, rpm: 6250), .init(temp: 90, rpm: 7826)],
+        // Puget Systems-style BIOS curve (Gigabyte Smart Fan 5): 0 °C 0%, 30 °C 25%, 55 °C 35%, 70 °C 50%,
+        // 80 °C 75%, 90 °C 100%, on the same 7826 rpm scale. 25% is below the fans' minimum, so they
+        // stay off until ~42 °C.
+        "Puget Systems": [.init(temp: 0, rpm: 0), .init(temp: 30, rpm: 1957), .init(temp: 55, rpm: 2739), .init(temp: 70, rpm: 3913), .init(temp: 80, rpm: 5870), .init(temp: 90, rpm: 7826)],
+    ]
+
+    /// The laptop-tweaked Noctua curves shipped before 2026-09-27 (fans-off zone), mapped to their
+    /// current names so a saved config still shows the right profile.
+    public static let legacyPresets: [String: [CurvePoint]] = [
         "Noctua Quiet": [.init(temp: 55, rpm: 0), .init(temp: 60, rpm: 3150), .init(temp: 80, rpm: 3900), .init(temp: 90, rpm: 5500), .init(temp: 95, rpm: 7826)],
         "Noctua Balanced": [.init(temp: 50, rpm: 0), .init(temp: 55, rpm: 3500), .init(temp: 60, rpm: 3900), .init(temp: 80, rpm: 5500), .init(temp: 95, rpm: 7826)],
         "Noctua Performance": [.init(temp: 45, rpm: 0), .init(temp: 50, rpm: 3500), .init(temp: 60, rpm: 4700), .init(temp: 80, rpm: 6250), .init(temp: 90, rpm: 7826)],

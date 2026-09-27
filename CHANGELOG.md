@@ -5,7 +5,11 @@ FanCurve uses date-based versions (`YYYY.MM.DD.HHMM`). See [Releases](../../rele
 ## 2026-09-27
 
 ### Added
+- **Puget Systems fan preset:** 30 °C 25%, 55 °C 35%, 70 °C 50%, 80 °C 75%, 90 °C 100%.
 - **Download a model from Settings:** a one-click Gemma 4 E2B download from Hugging Face (Google's official build or Unsloth's Q4_K_M), with progress, a free-space check and SHA-256 verification.
+
+### Changed
+- **Noctua presets restored to Noctua's original curves,** including the 30% floor. The laptop fans-off zone is gone; a curve saved from the old presets switches to the matching original.
 
 ### Removed
 - **Cotypist import:** the model and style import buttons are gone. A model you already imported keeps working.

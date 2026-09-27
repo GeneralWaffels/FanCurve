@@ -235,7 +235,7 @@ struct AutoProfilesSection: View {
         switch c {
         case .battery, .meeting: profile = quiet
         case .charger: profile = FanConfig.presetOrder.dropFirst().first ?? quiet
-        case .app: profile = FanConfig.presetOrder.last ?? quiet
+        case .app: profile = "Noctua Performance"
         }
         auto.rules.append(.init(condition: c, profile: profile))
     }

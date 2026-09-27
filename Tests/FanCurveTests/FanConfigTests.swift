@@ -25,22 +25,33 @@ struct FanConfigTests {
         #expect(c.startTemp(fanMin: 2317) == nil)
     }
 
-    @Test(arguments: FanConfig.presetOrder)
-    func presetsHaveFansOffZone(_ name: String) throws {
+    @Test(arguments: FanConfig.presetOrder.filter { $0.hasPrefix("Noctua") })
+    func noctuaPresetsKeepTheirFloor(_ name: String) throws {
         var c = FanConfig()
         c.points = try #require(FanConfig.presets[name])
-        #expect(c.rpm(at: 40) == 0, "laptop presets keep the fans off at idle")
-        let start = try #require(c.startTemp(fanMin: 2317))
-        #expect(start > 44 && start < 60)
+        #expect(c.rpm(at: 30) == 2350, "Noctua's 30% floor keeps the fans turning")
         #expect(c.rpm(at: 100) == 7826)
     }
 
-    @Test func presetsGetLouderInOrder() throws {
-        let starts = try FanConfig.presetOrder.map { name -> Double in
-            var c = FanConfig(); c.points = try #require(FanConfig.presets[name])
-            return try #require(c.startTemp(fanMin: 2317))
+    @Test func noctuaPresetsGetLouderInOrder() throws {
+        let at70 = try ["Noctua Quiet", "Noctua Balanced", "Noctua Performance"].map { name -> Double in
+            var c = FanConfig(); c.points = try #require(FanConfig.presets[name]); return c.rpm(at: 70)
         }
-        #expect(starts == starts.sorted(by: >), "Quiet starts latest, Performance earliest")
+        #expect(at70 == at70.sorted())
+    }
+
+    @Test func pugetCurveMatchesItsBiosPoints() throws {
+        var c = FanConfig()
+        c.points = try #require(FanConfig.presets["Puget Systems"])
+        #expect(abs(c.rpm(at: 55) / 7826 - 0.35) < 0.001)
+        #expect(abs(c.rpm(at: 80) / 7826 - 0.75) < 0.001)
+        #expect(c.rpm(at: 90) == 7826)
+        let start = try #require(c.startTemp(fanMin: 2317))
+        #expect(start > 41 && start < 43, "25% is below the fans' minimum, so they start around 42 °C")
+    }
+
+    @Test func legacyPresetsKeepTheirNames() {
+        #expect(Set(FanConfig.legacyPresets.keys).isSubset(of: Set(FanConfig.presets.keys)))
     }
 
     @Test func oldConfigFilesStillLoad() throws {
