@@ -2,6 +2,14 @@
 
 FanCurve uses date-based versions (`YYYY.MM.DD.HHMM`). See [Releases](../../releases) for downloadable builds.
 
+## 2026-09-27
+
+### Added
+- **Download a model from Settings:** a one-click Gemma 4 E2B download from Hugging Face (Google's official build or Unsloth's Q4_K_M), with progress, a free-space check and SHA-256 verification.
+
+### Removed
+- **Cotypist import:** the model and style import buttons are gone. A model you already imported keeps working.
+
 ## 2026-09-26
 
 ### Added

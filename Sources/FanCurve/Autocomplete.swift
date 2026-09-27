@@ -7,7 +7,7 @@ import SwiftUI
 import FoundationModels
 #endif
 
-/// Cotypist-style AI autocomplete that runs entirely on this Mac.
+/// AI autocomplete that runs entirely on this Mac.
 ///
 /// It reads the text before the cursor through Accessibility, asks a local model (llama.cpp's
 /// `llama-server` running a GGUF model such as Gemma 4 E2B) for the next few words, and shows them as
@@ -77,6 +77,8 @@ final class Autocomplete: ObservableObject {
     @Published private(set) var seenApps: [String: String] = [:]
 
     let folder: URL
+    /// Downloads models from Hugging Face (Settings → Autocomplete → Model).
+    let modelDownload: ModelDownload
     var modelsFolder: URL { folder.appendingPathComponent("Models") }
     private let defaults = UserDefaults.standard
     var server: Process?
@@ -103,14 +105,12 @@ final class Autocomplete: ObservableObject {
                                   "com.apple.keychainaccess", "com.apple.Terminal", "com.googlecode.iterm2",
                                   "local.fancurve.app", "app.cotypist.Cotypist"]
     static let serverPaths = ["/opt/homebrew/bin/llama-server", "/usr/local/bin/llama-server"]
-    static let cotypistModels = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Application Support/app.cotypist.Cotypist/Models")
 
     init() {
         folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("FanCurve")
+        modelDownload = ModelDownload(folder: folder.appendingPathComponent("Models"))
         enabled = defaults.bool(forKey: "acEnabled")
         style = defaults.string(forKey: "acStyle")
-            ?? UserDefaults(suiteName: "app.cotypist.Cotypist")?.string(forKey: "CompletionManager_userPrompt")
             ?? "Write in a clear, friendly and professional voice."
         useScreenContext = defaults.object(forKey: "acScreen") as? Bool ?? true
         learn = defaults.object(forKey: "acLearn") as? Bool ?? true
@@ -132,6 +132,7 @@ final class Autocomplete: ObservableObject {
         loadHistory()
         loadVocabulary()
         if modelFile.isEmpty { modelFile = availableModels.first ?? "" }
+        modelDownload.onFinished = { [weak self] name in self?.modelFile = name }   // switch to it straight away
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.server?.terminate() }
         }

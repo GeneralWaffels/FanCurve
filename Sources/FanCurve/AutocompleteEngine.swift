@@ -14,24 +14,6 @@ extension Autocomplete {
     var availableModels: [String] {
         ((try? FileManager.default.contentsOfDirectory(atPath: modelsFolder.path)) ?? []).filter { $0.hasSuffix(".gguf") }.sorted()
     }
-    var cotypistModel: URL? {
-        ((try? FileManager.default.contentsOfDirectory(at: Self.cotypistModels, includingPropertiesForKeys: nil)) ?? [])
-            .first { $0.pathExtension == "gguf" }
-    }
-
-    /// Copies Cotypist's model into FanCurve's folder. On APFS this is an instant clone that takes no extra
-    /// space, and stays intact if Cotypist is uninstalled.
-    func importCotypistModel() {
-        guard let src = cotypistModel else { return }
-        let dest = modelsFolder.appendingPathComponent(src.lastPathComponent)
-        if !FileManager.default.fileExists(atPath: dest.path) { try? FileManager.default.copyItem(at: src, to: dest) }
-        modelFile = src.lastPathComponent
-    }
-
-    func importCotypistStyle() {
-        if let s = UserDefaults(suiteName: "app.cotypist.Cotypist")?.string(forKey: "CompletionManager_userPrompt") { style = s }
-    }
-
     func start() {
         guard !paused else { return }
         installTap()

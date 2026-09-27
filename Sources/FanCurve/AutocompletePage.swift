@@ -69,11 +69,9 @@ struct AutocompletePage: View {
                         ForEach(ac.availableModels, id: \.self) { Text($0).tag($0) }
                     }
                 }
-                LabeledContent("Get a model") {
-                    HStack {
-                        if ac.cotypistModel != nil { Button("Import from Cotypist") { ac.importCotypistModel() } }
-                        Button("Show Models Folder") { NSWorkspace.shared.activateFileViewerSelecting([ac.modelsFolder]) }
-                    }
+                ModelDownloadRows(download: ac.modelDownload)
+                LabeledContent("Your own models") {
+                    Button("Show Models Folder") { NSWorkspace.shared.activateFileViewerSelecting([ac.modelsFolder]) }
                 }
                 if ac.serverPath == nil {
                     StatusRow(text: "llama.cpp isn't installed. Install it with: brew install llama.cpp", color: .orange)
@@ -81,7 +79,7 @@ struct AutocompletePage: View {
             } header: {
                 Text("Model")
             } footer: {
-                Footer("Any GGUF model works; small ones are fastest. Gemma 4 E2B (about 3.5 GB) gives good suggestions in roughly 0.1 s on Apple Silicon. Put .gguf files in the Models folder.")
+                Footer("Downloads come from Hugging Face and are checked against their published checksum. Gemma 4 E2B gives good suggestions in roughly 0.1 s on Apple Silicon. Any other GGUF model works too: put the .gguf file in the Models folder.")
             }
 
             Section {
@@ -89,9 +87,6 @@ struct AutocompletePage: View {
                     .font(.body)
                     .frame(minHeight: 80)
                     .scrollContentBackground(.hidden)
-                if UserDefaults(suiteName: "app.cotypist.Cotypist")?.string(forKey: "CompletionManager_userPrompt") != nil {
-                    Button("Import Style from Cotypist") { ac.importCotypistStyle() }.buttonStyle(.borderless)
-                }
             } header: {
                 Text("Your Writing Style")
             } footer: {

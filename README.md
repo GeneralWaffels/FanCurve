@@ -139,7 +139,10 @@ A Raycast-style glass search panel:
 - **Self-healing:** if llama-server crashes or stops answering, FanCurve restarts it.
 - **Also included:** emoji completion (`:smile` → 😄), autocorrect for misspelt words, short, medium or long suggestions, a choice of Tab or → to accept, a *Suggest now* shortcut, per-app switches, and word stats.
 - **On battery:** it can switch to Apple's on-device model, stopping llama.cpp to save power and about 3.5 GB of memory, or pause until you plug in.
-- **Setup:** `brew install llama.cpp`, then put a `.gguf` model in `~/Library/Application Support/FanCurve/Models` (or import one from Cotypist).
+- **Setup:**
+  1. Install llama.cpp: `brew install llama.cpp`.
+  2. Open Settings → Autocomplete → Model and click **Download** next to Gemma 4 E2B. That's Google's official build, 3.3 GB, from Hugging Face; a 3.1 GB Unsloth build is also offered. FanCurve checks the download against its published SHA-256 and switches to it.
+  3. To use a different model, put any `.gguf` file in `~/Library/Application Support/FanCurve/Models` and pick it in Settings.
 
 ### Displays
 
